@@ -212,6 +212,10 @@ export function ItemForm({
   function f<K extends keyof Item>(k: K, v: Item[K]) {
     set({ ...x, [k]: v });
   }
+  const [attempted, setAttempted] = useState(false);
+  const invalidCount =
+    piece(x.kind) && (!Number.isInteger(x.count) || x.count < 1);
+  const showCountError = attempted && invalidCount;
   const unit = pricingUnit(x, r);
   const invalid = (code: string) =>
     code
@@ -228,7 +232,21 @@ export function ItemForm({
     <Field label={label}>
       <input
         type="number"
-        min={k === "waste" ? 0 : 0.00001}
+        min={k === "count" ? 1 : k === "waste" ? 0 : 0.00001}
+        required={k === "count"}
+        aria-invalid={(k === "count" && showCountError) || undefined}
+        aria-describedby={
+          k === "count" && showCountError ? "piece-count-error" : undefined
+        }
+        onInvalid={
+          k === "count"
+            ? (e) => {
+                e.preventDefault();
+                setAttempted(true);
+                e.currentTarget.focus();
+              }
+            : undefined
+        }
         step={k === "count" ? 1 : "any"}
         value={x[k] ?? ""}
         onChange={(e) =>
@@ -242,7 +260,8 @@ export function ItemForm({
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          if (issue) return;
+          setAttempted(true);
+          if (invalidCount || issue) return;
           submit({ ...x, review: false });
         }}
       >
@@ -283,7 +302,14 @@ export function ItemForm({
             <input value={x.spec} onChange={(e) => f("spec", e.target.value)} />
           </Field>
           {piece(x.kind) ? (
-            numeric("count", "Quantity (pc)")
+            <div>
+              {numeric("count", "Quantity (pc)")}
+              {showCountError && (
+                <p id="piece-count-error" className="issue" role="alert">
+                  Enter a whole number of 1 or more.
+                </p>
+              )}
+            </div>
           ) : x.kind === "Circular duct" ? (
             numeric("diameter", "Diameter (mm)")
           ) : (

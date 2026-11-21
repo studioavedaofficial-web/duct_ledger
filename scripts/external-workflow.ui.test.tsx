@@ -379,10 +379,13 @@ test("Evidence on a physically reordered revised PDF renders the paired old and 
     target: { value: "*" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Review evidence" }));
-  await waitFor(() =>
-    expect(
-      screen.getByRole("button", { name: "Confirm" }).hasAttribute("disabled"),
-    ).toBe(false),
+  await waitFor(
+    () =>
+      expect(
+        screen
+          .getByRole("button", { name: "Confirm" })
+          .hasAttribute("disabled"),
+      ).toBe(false),
     { timeout: 6000 },
   );
   for (const [rev, n] of [
@@ -399,14 +402,12 @@ test("Evidence on a physically reordered revised PDF renders the paired old and 
 
 import { sampleTender } from "../src/sample";
 async function openSampleCopy() {
-  const fetchSample = vi
-    .spyOn(globalThis, "fetch")
-    .mockImplementation(
-      async (url) =>
-        new Response(readFileSync("public" + url), {
-          headers: { "Content-Type": "application/pdf" },
-        }),
-    );
+  const fetchSample = vi.spyOn(globalThis, "fetch").mockImplementation(
+    async (url) =>
+      new Response(readFileSync("public" + url), {
+        headers: { "Content-Type": "application/pdf" },
+      }),
+  );
   const project = await sampleTender();
   fetchSample.mockRestore();
   project.name += " (disposable QA)";
@@ -725,6 +726,21 @@ test("Sample B/C: mixed pricing, credit, cancelling changes and an explicit zero
       /PKR 5,000.*PKR -5,000/,
     );
     await checkExport(0, 0);
+    press("Takeoff");
+    editField("BOQ mapping", "");
+    press("Reports");
+    assertOverview(
+      "Incomplete",
+      "Incomplete",
+      "PKR -5,000",
+      "PKR -5,000",
+      "PKR 0",
+    );
+    expect(
+      overview().getByRole("button", { name: "SA-001 · M-101" }),
+    ).toBeTruthy();
+    press("SA-001 · M-101");
+    editField("BOQ mapping", "GI-MAIN");
     editMainRate("0");
     press("Reports");
     assertOverview(
@@ -739,4 +755,92 @@ test("Sample B/C: mixed pricing, credit, cancelling changes and an explicit zero
     cleanup();
     vi.restoreAllMocks();
   }
+});
+
+test("Sample fitting count saves, rolls up, persists and rejects invalid edits", async () => {
+  await openSampleCopy();
+  const elbowRow = () =>
+    screen.getByRole("row", { name: /FT-EL Rectangular elbow/ });
+  press("BOQ");
+  expect(elbowRow().textContent).toContain("4 pc2,4009,600");
+  press("Takeoff");
+  fireEvent.pointerDown(screen.getByRole("button", { name: "Select EL-001" }));
+  press("Edit item");
+  const quantity = () =>
+    screen.getByLabelText("Quantity (pc)") as HTMLInputElement;
+  const count = (value: string) =>
+    fireEvent.change(quantity(), { target: { value } });
+  count("2");
+  expect(quantity().min).toBe("1");
+  expect(quantity().step).toBe("1");
+  press("Save item");
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(screen.getByText("Item amount").parentElement!.textContent).toMatch(
+    /PKR\s*4,800/,
+  );
+  expect(screen.getByText("Count").parentElement!.textContent).toMatch(
+    /2\s*pc/,
+  );
+  press("BOQ");
+  expect(elbowRow().textContent).toContain("5 pc2,40012,000");
+  await screen.findByText("Saved locally");
+  cleanup();
+  render(<App />);
+  await screen.findByRole("heading", { name: "Drawing takeoff" });
+  fireEvent.pointerDown(screen.getByRole("button", { name: "Select EL-001" }));
+  press("Edit item");
+  expect(quantity().value).toBe("2");
+  const zone = screen.getByLabelText("Floor / zone") as HTMLInputElement;
+  fireEvent.change(zone, { target: { value: "Edited zone" } });
+  for (const value of ["", "0", "-1", "1.5"]) {
+    count(value);
+    press("Save item");
+    expect(screen.getByRole("alert").textContent).toBe(
+      "Enter a whole number of 1 or more.",
+    );
+    expect(quantity().value).toBe(value);
+    expect(zone.value).toBe("Edited zone");
+  }
+  count("1");
+  press("Save item");
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(screen.getByText("Count").parentElement!.textContent).toMatch(
+    /1\s*pc/,
+  );
+  fireEvent.pointerDown(screen.getByRole("button", { name: "Select SA-001" }));
+  editField("Width (mm)", "800.5");
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(screen.getByText("Width").parentElement!.textContent).toContain(
+    "800.5",
+  );
+  await screen.findByText("Saved locally");
+});
+
+test("Create all five fitting types with positive whole counts", async () => {
+  await openSampleCopy();
+  for (const kind of ["Elbow", "Tee", "Reducer", "Damper", "Diffuser"]) {
+    press("Measure");
+    fireEvent.change(screen.getByLabelText("Item type"), {
+      target: { value: kind },
+    });
+    press("Start measuring");
+    const plan = screen.getByLabelText(
+      "Drawing measurement layer",
+    ) as unknown as SVGSVGElement;
+    plan.getScreenCTM = () => new DOMMatrix();
+    fireEvent.pointerDown(plan, { clientX: 100, clientY: 100 });
+    const quantity = screen.getByLabelText("Quantity (pc)");
+    fireEvent.change(quantity, { target: { value: "2.5" } });
+    press("Save item");
+    expect(screen.getByRole("alert").textContent).toBe(
+      "Enter a whole number of 1 or more.",
+    );
+    fireEvent.change(quantity, { target: { value: "3" } });
+    press("Save item");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByText("Count").parentElement!.textContent).toMatch(
+      /3\s*pc/,
+    );
+  }
+  await screen.findByText("Saved locally");
 });
