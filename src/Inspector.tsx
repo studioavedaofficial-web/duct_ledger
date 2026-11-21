@@ -1,0 +1,342 @@
+import { useState } from "react";
+import {
+SlidersHorizontal,
+Box,
+Pencil,
+Ruler,
+Calculator,
+ChevronDown,Table2,Trash2,
+Focus
+} from "lucide-react";
+import {
+calculate,
+fmt,
+kinds,
+piece,
+type Item,
+type Rev,
+type Kind,
+} from "./model";
+import { Field,Choice,Modal,IconButton,Empty } from "./ui";
+export function Inspector({
+  r,
+  item,
+  edit,
+  openBoq,
+}: {
+  r: Rev;
+  item?: Item;
+  edit: () => void;
+  openBoq: () => void;
+}) {
+  const [detail, setDetail] = useState(false);
+  if (!item)
+    return (
+      <aside className="inspector">
+        <div className="panelhead">
+          <SlidersHorizontal />
+          Item inspector
+        </div>
+        <Empty
+          title="No item selected"
+          text="Select a drawing item or measure a new run."
+        />
+      </aside>
+    );
+  const c = calculate(item, r),
+    f = piece(item.kind);
+  return (
+    <aside className="inspector">
+      <div className="panelhead">
+        <SlidersHorizontal size={17} />
+        Item inspector
+      </div>
+      <div className="inspectscroll">
+        <section className="inspect-section itemtop">
+          <div className="itemicon">
+            <Box size={25} />
+          </div>
+          <div className="itemtitle">
+            <div>
+              <span className="idtag">{item.id}</span>
+              <h3>{item.kind}</h3>
+            </div>
+            {!r.frozen && (
+              <IconButton title="Edit item" onClick={edit}>
+                <Pencil size={15} />
+              </IconButton>
+            )}
+          </div>
+          <div className="keyrow">
+            <span>System</span>
+            <b className="systemtag">
+              <i
+                className={
+                  "dot " + (item.system === "Return air" ? "amber" : "")
+                }
+              />
+              {item.system}
+            </b>
+          </div>
+          <div className="keyrow">
+            <span>Zone</span>
+            <b>{item.zone}</b>
+          </div>
+          <div className="keyrow">
+            <span>Material</span>
+            <b>{item.spec || "Unresolved"}</b>
+          </div>
+        </section>
+        <section className="inspect-section">
+          <h4>
+            <Ruler size={16} /> Dimensions
+          </h4>
+          <div className="dimgrid">
+            {f ? (
+              <Dim label="Count" value={item.count} unit="pc" />
+            ) : item.kind === "Circular duct" ? (
+              <Dim label="Diameter" value={item.diameter} unit="mm" />
+            ) : (
+              <>
+                <Dim label="Width" value={item.width} unit="mm" />
+                <Dim label="Height" value={item.height} unit="mm" />
+              </>
+            )}
+          </div>
+          {!f && (
+            <div className="keyrow length">
+              <span>
+                {item.kind === "Vertical riser"
+                  ? "Vertical length"
+                  : "Measured length"}
+              </span>
+              <b>{fmt(c.length)} m</b>
+            </div>
+          )}
+        </section>
+        <section className="inspect-section">
+          <h4>
+            <Calculator size={16} /> Quantity & cost
+          </h4>
+          <div className="keyrow">
+            <span>Net quantity</span>
+            <b>
+              {fmt(c.net)} {c.unit}
+            </b>
+          </div>
+          <div className="keyrow">
+            <span>Material waste</span>
+            <b>{fmt(item.waste)}%</b>
+          </div>
+          <div className="keyrow">
+            <span>Priced quantity</span>
+            <b>
+              {fmt(c.quantity)} {c.unit}
+            </b>
+          </div>
+          <div className="keyrow">
+            <span>Unit rate</span>
+            <b>
+              {fmt(c.rate)} <small>PKR/{c.unit}</small>
+            </b>
+          </div>
+          <div className="amountbox">
+            <span>Item amount</span>
+            <strong>
+              <small>PKR</small> {fmt(c.amount)}
+            </strong>
+          </div>
+          <button className="calc-toggle" onClick={() => setDetail(!detail)}>
+            <ChevronDown size={14} />
+            {detail ? "Hide" : "Show"} calculation
+          </button>
+          {detail && (
+            <p className="formula">
+              {f
+                ? item.count + " pieces"
+                : item.kind === "Circular duct"
+                  ? "π × " +
+                    fmt(item.diameter) +
+                    " / 1,000 × " +
+                    fmt(c.length) +
+                    " m"
+                  : "2 × (" +
+                    fmt(item.width) +
+                    " + " +
+                    fmt(item.height) +
+                    ") / 1,000 × " +
+                    fmt(c.length) +
+                    " m"}
+              {!f && " = " + fmt(c.area) + " m²"}. {fmt(c.quantity)} {c.unit} ×
+              PKR {fmt(c.rate)}/{c.unit} = PKR {fmt(c.amount)}.
+            </p>
+          )}
+          {c.errors.map((e) => (
+            <div key={e} className="issue">
+              {e}
+            </div>
+          ))}
+        </section>
+        <button className="boqlink" onClick={openBoq}>
+          <Table2 size={16} /> View BOQ mapping{" "}
+          <span>{item.code || "Unmapped"}</span>
+        </button>
+      </div>
+    </aside>
+  );
+}
+function Dim({
+  label,
+  value,
+  unit,
+}: {
+  label: string;
+  value: number | null;
+  unit: string;
+}) {
+  return (
+    <div className="dim">
+      <span>{label}</span>
+      <b>
+        {fmt(value)} <small>{unit}</small>
+      </b>
+    </div>
+  );
+}
+export function ItemForm({
+  item,
+  r,
+  close,
+  submit,
+  remove,
+  redraw,
+}: {
+  item: Item;
+  r: Rev;
+  close: () => void;
+  submit: (i: Item) => void;
+  remove: () => void;
+  redraw: () => void;
+}) {
+  const [x, set] = useState(structuredClone(item));
+  function f<K extends keyof Item>(k: K, v: Item[K]) {
+    set({ ...x, [k]: v });
+  }
+  const numeric = (
+    k: "width" | "height" | "diameter" | "rise" | "count" | "waste",
+    label: string,
+  ) => (
+    <Field label={label}>
+      <input
+        type="number"
+        min={k === "waste" ? 0 : 0.00001}
+        step={k === "count" ? 1 : "any"}
+        value={x[k] ?? ""}
+        onChange={(e) =>
+          f(k, e.target.value === "" ? null : Number(e.target.value))
+        }
+      />
+    </Field>
+  );
+  return (
+    <Modal title={"Edit " + x.id} close={close}>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          submit({ ...x, review: false });
+        }}
+      >
+        <div className="fieldgrid">
+          <Field label="Item type">
+            <Choice
+              value={x.kind}
+              onChange={(e) => f("kind", e.target.value as Kind)}
+            >
+              {kinds
+                .filter(
+                  (k) =>
+                    piece(k) === piece(item.kind) &&
+                    (k === "Vertical riser") ===
+                      (item.kind === "Vertical riser"),
+                )
+                .map((k) => (
+                  <option key={k}>{k}</option>
+                ))}
+            </Choice>
+          </Field>
+          <Field label="System">
+            <Choice
+              value={x.system}
+              onChange={(e) => f("system", e.target.value)}
+            >
+              {["Supply air", "Return air", "Exhaust air", "Fresh air"].map(
+                (s) => (
+                  <option key={s}>{s}</option>
+                ),
+              )}
+            </Choice>
+          </Field>
+          <Field label="Floor / zone">
+            <input value={x.zone} onChange={(e) => f("zone", e.target.value)} />
+          </Field>
+          <Field label="Material specification">
+            <input value={x.spec} onChange={(e) => f("spec", e.target.value)} />
+          </Field>
+          {piece(x.kind) ? (
+            numeric("count", "Quantity (pc)")
+          ) : x.kind === "Circular duct" ? (
+            numeric("diameter", "Diameter (mm)")
+          ) : (
+            <>
+              {numeric("width", "Width (mm)")}
+              {numeric("height", "Height (mm)")}
+            </>
+          )}
+          {x.kind === "Vertical riser" &&
+            numeric("rise", "Vertical length (m)")}
+          {!piece(x.kind) && numeric("waste", "Material waste (%)")}
+          <Field label="BOQ mapping">
+            <Choice value={x.code} onChange={(e) => f("code", e.target.value)}>
+              <option value="">Unmapped</option>
+              {r.rates.map((v) => (
+                <option key={v.code} value={v.code}>
+                  {v.code} · {v.unit}
+                </option>
+              ))}
+            </Choice>
+          </Field>
+          <Field label="Change classification">
+            <Choice
+              value={x.decision ?? ""}
+              onChange={(e) => f("decision", e.target.value)}
+            >
+              {[
+                "",
+                "Retained",
+                "Added",
+                "Resized",
+                "Rerouted",
+                "Specification changed",
+              ].map((v) => (
+                <option key={v} value={v}>
+                  {v || "Detect from edits"}
+                </option>
+              ))}
+            </Choice>
+          </Field>
+        </div>
+        <div className="formactions">
+          <button type="button" className="danger" onClick={remove}>
+            <Trash2 size={15} />
+            Remove
+          </button>
+          <button type="button" className="secondary" onClick={redraw}>
+            <Focus size={15} />
+            Redraw
+          </button>
+          <button className="primary">Save item</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
