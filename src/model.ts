@@ -273,9 +273,11 @@ export function changes(old: Rev | undefined, next: Rev) {
                   ? "Rate changed"
                   : o?.quantity !== n?.quantity
                     ? "Quantity changed"
-                    : b.decision && b.decision !== "Retained"
-                      ? b.decision
-                      : "Retained";
+                    : (o?.amount === null) !== (n?.amount === null)
+                      ? "Pricing checks changed"
+                      : b.decision && b.decision !== "Retained"
+                        ? b.decision
+                        : "Retained";
     if (type !== "Retained") emit(type, o, n, b ? "new" : "old", id);
   }
   return result;
@@ -374,33 +376,83 @@ export function boq(r: Rev) {
   );
 }
 export type Change = ReturnType<typeof changes>[number];
+export function quantityDifference(c: Change) {
+  if (c.old?.quantity === null || c.next?.quantity === null) return null;
+  return (c.next?.quantity ?? 0) - (c.old?.quantity ?? 0);
+}
 export const confirmed = (r: Rev, c: Change) =>
   r.approved.includes(c.key) || r.approved.includes(c.id);
-export function reviewTotals(rows: Change[], r: Rev) {
+export function reviewTotals(rows: Change[], r: Rev, old?: Rev) {
+  const unresolved = rows.flatMap((c) =>
+    (["old", "next"] as const).flatMap((side) => {
+      const line = c[side];
+      if (!line || line.amount !== null) return [];
+      const baseline = side === "old";
+      const rev = baseline ? old : r;
+      const sheetId = baseline ? c.oldSheetId : c.newSheetId;
+      return [
+        {
+          id: c.id,
+          baseline,
+          sheet:
+            rev?.sheets.find((s) => s.id === sheetId)?.number ?? sheetId ?? "",
+          reason: [...new Set(line.errors)].join(" · ") || "Amount unavailable",
+          needsRate: line.rate === null,
+        },
+      ];
+    }),
+  );
+  const unpricedIds = new Set(unresolved.map((item) => item.id));
+  const pricedIds = new Set<string>();
   let accepted = 0,
     pending = 0,
     additions = 0,
-    credits = 0,
-    unpriced = 0;
+    credits = 0;
   for (const c of rows) {
-    if (c.delta === null) {
-      unpriced++;
-      continue;
-    }
+    // A unit change can span two rows. Include it only when both legs are valued.
+    if (c.delta === null || unpricedIds.has(c.id)) continue;
+    pricedIds.add(c.id);
     if (confirmed(r, c)) accepted += c.delta;
     else pending += c.delta;
     if (c.delta < 0) credits += c.delta;
     else additions += c.delta;
   }
+  const unpriced = unpricedIds.size;
+  const pricedSubtotal = round(accepted + pending);
+  const needsRate = unresolved.every((entry) => entry.needsRate);
+  const reason =
+    unpriced === 0
+      ? ""
+      : unpriced === 1
+        ? needsRate
+          ? "1 changed item needs a rate."
+          : "1 changed item cannot be priced."
+        : unpriced +
+          (needsRate
+            ? " changed items need rates."
+            : " changed items cannot be priced.");
   return {
+    status: unpriced ? "Incomplete" : "Complete",
+    proposed: unpriced ? null : pricedSubtotal,
+    pricedSubtotal,
+    pricedCount: pricedIds.size,
     confirmed: round(accepted),
     pending: round(pending),
-    proposed: round(accepted + pending),
     additions: round(additions),
     credits: round(credits),
     unpriced,
+    unresolved,
+    reason,
   };
 }
+export type VariationSummary = ReturnType<typeof reviewTotals>;
+export const variationHeadline = (m: VariationSummary) =>
+  "Total proposed variation: " +
+  (m.proposed === null ? m.status : "PKR " + fmt(m.proposed));
+export const pricedSubtotalText = (m: VariationSummary) =>
+  m.unpriced && !m.pricedCount
+    ? "No priced changes yet"
+    : "PKR " + fmt(m.pricedSubtotal);
 export function finalChecks(r: Rev, rows: Change[]) {
   return [
     ...exceptions(r),

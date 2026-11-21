@@ -62,7 +62,14 @@ import { sampleThumbnails } from "./sampleLayout";
 import { DrawingCanvas, type Tool } from "./Canvas";
 import { Modal, Mark, Choice, Field, Empty } from "./ui";
 import { Inspector, ItemForm } from "./Inspector";
-import { BOQ, Metric, ReviewTable, Compare, ExportDialog } from "./Reports";
+import {
+  BOQ,
+  Metric,
+  ReviewTable,
+  Compare,
+  VariationOverview,
+  ExportDialog,
+} from "./Reports";
 import { RatesDialog, ClientDialog } from "./Imports";
 import "./style.css";
 const tabs = [
@@ -458,7 +465,7 @@ export default function App() {
     oldSheet = old?.sheets.find(
       (s) => s.id === (oldItemEvidence?.sheet ?? filter),
     );
-  const money = reviewTotals(changed, r),
+  const money = reviewTotals(changed, r, old),
     checks = finalChecks(r, changed);
   function openEvidence(c: Change) {
     setView("Revisions");
@@ -714,46 +721,23 @@ export default function App() {
                 )}
               </div>
             </div>
-            <div className="metrics">
-              {view === "Revisions" ? (
-                <>
-                  <Metric
-                    title="Baseline revision"
-                    value={old ? "Revision " + old.id : "Original tender"}
-                  />
-                  <Metric
-                    title="Changed lines · project"
-                    value={String(changed.length)}
-                  />
-                  <Metric
-                    title="Pending changes · project"
-                    value={String(unconfirmed.length)}
-                  />
-                </>
-              ) : (
-                <>
-                  <Metric
-                    title="Confirmed net variation"
-                    value={"PKR " + fmt(money.confirmed)}
-                  />
-                  <Metric
-                    title="Pending net variation"
-                    value={"PKR " + fmt(money.pending)}
-                  />
-                  <Metric
-                    title="Total proposed variation"
-                    value={"PKR " + fmt(money.proposed)}
-                  />
-                </>
-              )}
-            </div>
-            {view === "Reports" && (
-              <p className="quiet">
-                Proposed additions · PKR {fmt(money.additions)}　 Credits · PKR{" "}
-                {fmt(money.credits)}
-                {money.unpriced > 0 &&
-                  " · " + money.unpriced + " unpriced change(s) excluded"}
-              </p>
+            {view === "Revisions" ? (
+              <div className="metrics">
+                <Metric
+                  title="Baseline revision"
+                  value={old ? "Revision " + old.id : "Original tender"}
+                />
+                <Metric
+                  title="Changed lines · project"
+                  value={String(changed.length)}
+                />
+                <Metric
+                  title="Pending changes · project"
+                  value={String(unconfirmed.length)}
+                />
+              </div>
+            ) : (
+              <VariationOverview money={money} go={go} />
             )}
             {view === "Revisions" && old && (
               <>
@@ -1440,6 +1424,7 @@ export default function App() {
       )}
       {dialog === "export" && (
         <ExportDialog
+          go={go}
           p={p}
           r={r}
           old={old}

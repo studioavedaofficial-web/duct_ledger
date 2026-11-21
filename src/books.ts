@@ -5,9 +5,11 @@ import {
   finalChecks,
   confirmed,
   reviewTotals,
+  variationHeadline,
   moneyPolicy,
   sheetLabel,
   quantityExplanation,
+  quantityDifference,
   boq,
   calculate,
   changes,
@@ -136,7 +138,7 @@ export async function estimateBook(
     issue = draft ? "DRAFT" : "FINAL",
     rows = changes(old, r);
   const checks = finalChecks(r, rows),
-    money = reviewTotals(rows, r);
+    money = reviewTotals(rows, r, old);
   if (!draft && checks.length) throw Error(checks.join(" · "));
   function add(
     name: string,
@@ -235,7 +237,7 @@ export async function estimateBook(
       moneyPolicy,
     ]),
   );
-  add(
+  const summarySheet = add(
     "Variation summary",
     ["Metric", "Value", "Unit"],
     [
@@ -244,9 +246,15 @@ export async function estimateBook(
       ["Additions", money.additions, "PKR"],
       ["Credits", money.credits, "PKR"],
       ["Total proposed variation", money.proposed, "PKR"],
-      ["Confirmed net variation", money.confirmed, "PKR"],
-      ["Pending net variation", money.pending, "PKR"],
-      ["Unpriced changes excluded (count)", money.unpriced, "changes"],
+      ["Confirmed priced subtotal", money.confirmed, "PKR"],
+      ["Pending priced subtotal", money.pending, "PKR"],
+      ["Pricing status", money.status],
+      ["Priced changes subtotal", money.pricedSubtotal, "PKR"],
+      ["Unresolved changed items", money.unpriced, "items"],
+      ...(money.reason ? [["Pricing check", money.reason]] : []),
+      ...(money.unpriced && !money.pricedCount
+        ? [["Priced changes", "No priced changes yet"]]
+        : []),
       [
         "Unresolved estimate items excluded (count)",
         r.items.filter((i) => calculate(i, r).amount === null).length,
@@ -254,6 +262,12 @@ export async function estimateBook(
       ],
     ],
   );
+  summarySheet.getCell("D3").value = variationHeadline(money);
+  summarySheet.getCell("D3").font = { bold: true };
+  if (money.reason) summarySheet.getCell("D4").value = money.reason;
+  summarySheet.getColumn(4).width = 48;
+  summarySheet.getColumn(1).width = 43;
+  summarySheet.getColumn(2).width = 36;
   add(
     "Detailed changes",
     [
@@ -300,7 +314,7 @@ export async function estimateBook(
       x.delta,
       confirmed(r, x) ? "Confirmed" : "Pending",
       [old?.date, r.date].join(" / "),
-      (x.next?.quantity ?? 0) - (x.old?.quantity ?? 0),
+      quantityDifference(x),
       x.old && old
         ? quantityExplanation(
             old.items.find((i) => i.id === x.id)!,
@@ -319,6 +333,12 @@ export async function estimateBook(
     "Outstanding queries",
     ["ID", "Sheet", "Query or exception", "Response"],
     [
+      ...money.unresolved.map((item) => [
+        item.id,
+        item.sheet,
+        item.reason,
+        item.baseline ? "Baseline" : "Revised",
+      ]),
       ...r.queries.map((q) => [
         q.id,
         r.sheets.find((s) => s.id === q.sheet)?.number,

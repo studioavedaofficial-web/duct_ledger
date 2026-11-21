@@ -284,6 +284,12 @@ async function openDisposable(edit?: (proj: typeof p) => void) {
 const clickButton = (name: string) =>
   fireEvent.click(screen.getByRole("button", { name, exact: true }));
 function checkMetric(label: string, amount: string) {
+  if (label === "Total proposed variation") {
+    expect(
+      screen.getByRole("heading", { name: label + ": PKR " + amount }),
+    ).toBeTruthy();
+    return;
+  }
   expect(screen.getByText(label).parentElement!.textContent).toContain(
     "PKR " + amount,
   );
@@ -292,8 +298,8 @@ test("Sheet filtering, two matching highlights, one confirmation, refresh and ed
   const { copy, app } = await openDisposable(),
     frozen = JSON.stringify(copy.revs[0]);
   clickButton("Reports");
-  checkMetric("Confirmed net variation", "0");
-  checkMetric("Pending net variation", "14,800");
+  checkMetric("Confirmed priced subtotal", "0");
+  checkMetric("Pending priced subtotal", "14,800");
   checkMetric("Total proposed variation", "14,800");
   clickButton("Revisions");
   const choose = (v: string) =>
@@ -325,8 +331,8 @@ test("Sheet filtering, two matching highlights, one confirmation, refresh and ed
     ).toBeTruthy();
   clickButton("Confirm");
   clickButton("Reports");
-  checkMetric("Confirmed net variation", "14,800");
-  checkMetric("Pending net variation", "0");
+  checkMetric("Confirmed priced subtotal", "14,800");
+  checkMetric("Pending priced subtotal", "0");
   checkMetric("Total proposed variation", "14,800");
   await waitFor(async () =>
     expect((await getProject(copy.id))!.revs[1].approved).toEqual(["SA-001"]),
@@ -335,7 +341,7 @@ test("Sheet filtering, two matching highlights, one confirmation, refresh and ed
   render(<App />);
   await screen.findByRole("heading", { name: "Drawing takeoff" });
   clickButton("Reports");
-  checkMetric("Confirmed net variation", "14,800");
+  checkMetric("Confirmed priced subtotal", "14,800");
   expect(screen.getAllByRole("row", { name: /SA-001/ })).toHaveLength(1);
   clickButton("Takeoff");
   clickButton("Edit item");
@@ -344,8 +350,8 @@ test("Sheet filtering, two matching highlights, one confirmation, refresh and ed
   });
   clickButton("Save item");
   clickButton("Reports");
-  checkMetric("Confirmed net variation", "0");
-  checkMetric("Pending net variation", "17,500");
+  checkMetric("Confirmed priced subtotal", "0");
+  checkMetric("Pending priced subtotal", "17,500");
   await waitFor(async () =>
     expect((await getProject(copy.id))!.revs[1].approved).toEqual([]),
   );

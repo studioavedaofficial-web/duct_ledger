@@ -1712,3 +1712,10 @@ td small {
     padding-bottom: 8px;
   }
 }
+
+.variation-overview { margin: 1rem 0; }
+.variation-overview h3 { margin: 0; }
+.variation-overview .issue p { margin: .45rem 0 0; }
+.variation-overview .issue button { text-decoration: underline; }
+.variation-overview .metrics { margin: .65rem 0; }
+.variation-overview .metric { min-width: 0; }

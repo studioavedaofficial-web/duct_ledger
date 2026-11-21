@@ -13,12 +13,16 @@ import {
   sheetLabel,
   confirmed,
   reviewTotals,
+  pricedSubtotalText,
+  variationHeadline,
+  type VariationSummary,
   finalChecks,
   moneyPolicy,
   type Change,
   type Sheet,
   type Item,
   quantityExplanation,
+  quantityDifference,
   calculate,
   changes,
   fmt,
@@ -174,6 +178,56 @@ export function BOQ({
     </section>
   );
 }
+export function VariationOverview({
+  money,
+  go,
+}: {
+  money: VariationSummary;
+  go: (id: string, baseline?: boolean) => void;
+}) {
+  return (
+    <section className="variation-overview" aria-label="Variation summary">
+      <div className={money.unpriced ? "issue" : "variation-total"}>
+        <h3>{variationHeadline(money)}</h3>
+        {money.reason && <p>{money.reason}</p>}
+        {money.unresolved.map((item) => (
+          <p key={item.id + item.baseline}>
+            <button
+              className="textlink"
+              onClick={() => go(item.id, item.baseline)}
+            >
+              {item.id} · {item.sheet}
+              {item.baseline ? " (baseline)" : ""}
+            </button>
+            {" · "}
+            {item.reason}
+          </p>
+        ))}
+      </div>
+      <p>
+        Pricing status: <strong>{money.status}</strong>
+      </p>
+      <div className="metrics">
+        <Metric
+          title="Priced changes subtotal"
+          value={pricedSubtotalText(money)}
+        />
+        <Metric
+          title="Confirmed priced subtotal"
+          value={"PKR " + fmt(money.confirmed)}
+        />
+        <Metric
+          title="Pending priced subtotal"
+          value={"PKR " + fmt(money.pending)}
+        />
+      </div>
+      <p className="quiet">
+        Priced additions · PKR {fmt(money.additions)}　 Credits · PKR{" "}
+        {fmt(money.credits)}
+      </p>
+    </section>
+  );
+}
 export function Metric({ title, value }: { title: string; value: string }) {
   return (
     <div className="metric">
@@ -246,7 +300,7 @@ export function ReviewTable({
                 <td>
                   {c.description}
                   <small>
-                    Δ {fmt((c.next?.quantity ?? 0) - (c.old?.quantity ?? 0), 6)}{" "}
+                    Δ {fmt(quantityDifference(c), 6)}{" "}
                     {c.next?.unit ?? c.old?.unit}
                   </small>
                 </td>
@@ -352,7 +406,7 @@ export async function printReportHtml(
           })
           .join("") +
         "<p>Quantity difference " +
-        fmt((c.next?.quantity ?? 0) - (c.old?.quantity ?? 0), 6) +
+        fmt(quantityDifference(c), 6) +
         " " +
         escape(c.next?.unit ?? c.old?.unit) +
         "</p><p>Scope effect PKR " +
@@ -365,7 +419,10 @@ export async function printReportHtml(
       );
     }),
   );
-  const money = reviewTotals(rows, r);
+  const money = reviewTotals(rows, r, old);
+  const unresolvedEstimates = r.items.filter(
+    (i) => calculate(i, r).amount === null,
+  ).length;
   return (
     "<html><head><title>" +
     escape(p.name) +
@@ -381,24 +438,44 @@ export async function printReportHtml(
         "Revision " + r.id + " · " + r.date,
       ].join(" | "),
     ) +
-    "</p><p>Additions PKR " +
+    "</p><h2>" +
+    variationHeadline(money) +
+    "</h2>" +
+    (money.reason ? "<p>" + money.reason + "</p>" : "") +
+    money.unresolved
+      .map(
+        (item) =>
+          "<p>" +
+          escape(
+            item.id +
+              " · " +
+              item.sheet +
+              (item.baseline ? " (baseline)" : "") +
+              " · " +
+              item.reason,
+          ) +
+          "</p>",
+      )
+      .join("") +
+    "<p>Pricing status: " +
+    money.status +
+    "</p><p>Priced changes subtotal: " +
+    pricedSubtotalText(money) +
+    "</p><p>Confirmed priced subtotal · PKR " +
+    fmt(money.confirmed) +
+    "</p><p>Pending priced subtotal · PKR " +
+    fmt(money.pending) +
+    "</p><p>Priced additions PKR " +
     fmt(money.additions) +
     " · Credits PKR " +
     fmt(money.credits) +
-    "</p><p>Confirmed net variation · PKR " +
-    fmt(money.confirmed) +
-    "</p><p>Pending net variation · PKR " +
-    fmt(money.pending) +
-    "</p><h2>Total proposed variation · PKR " +
-    fmt(money.proposed) +
-    "</h2><p>Priced estimate subtotal · PKR " +
+    "</p><p>Priced estimate subtotal · PKR " +
     fmt(totals(r)) +
-    "</p>" +
-    "<p>" +
-    r.items.filter((i) => calculate(i, r).amount === null).length +
-    " unresolved estimate items and " +
-    money.unpriced +
-    " unpriced changes excluded.</p>" +
+    "</p><p>" +
+    unresolvedEstimates +
+    " unresolved estimate " +
+    (unresolvedEstimates === 1 ? "item" : "items") +
+    ".</p>" +
     excerpts.join("") +
     "<h3>Outstanding queries and assumptions</h3><p>" +
     (issues.length ? issues.map(escape).join("<br>") : "All checks resolved.") +
@@ -422,7 +499,11 @@ export async function printReport(
   d.open();
   d.write(html);
   d.close();
-  await Promise.all([...d.images].map((img) => img.decode().catch(() => {})));
+  await Promise.all(
+    Array.from(d.querySelectorAll("img")).map((img) =>
+      img.decode().catch(() => {}),
+    ),
+  );
   frame.contentWindow?.focus();
   frame.contentWindow?.print();
   setTimeout(() => frame.remove(), 120000);
@@ -434,7 +515,9 @@ export function ExportDialog({
   close,
   notify,
   client,
+  go,
 }: {
+  go: (id: string, baseline?: boolean) => void;
   p: Project;
   r: Rev;
   old?: Rev;
@@ -445,7 +528,8 @@ export function ExportDialog({
   const [draft, setDraft] = useState(true),
     [busy, setBusy] = useState(false),
     [err, error] = useState("");
-  const problems = finalChecks(r, changes(old, r));
+  const rows = changes(old, r);
+  const problems = finalChecks(r, rows);
   async function run(print: boolean) {
     setBusy(true);
     try {
@@ -468,10 +552,11 @@ export function ExportDialog({
     }
   }
   return (
-    <Modal title="Export report" close={close}>
+    <Modal title="Export report" wide close={close}>
       <p className="intro">
         {p.name} · Revision {r.id} · {r.date}
       </p>
+      <VariationOverview money={reviewTotals(rows, r, old)} go={go} />
       <Field label="Issue status">
         <Choice
           value={draft ? "Draft" : "Final"}

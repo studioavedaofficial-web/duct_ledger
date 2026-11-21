@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import "fake-indexeddb/auto";
 import React from "react";
-import { test, expect, vi } from "vitest";
+import { afterEach, test, expect, vi } from "vitest";
 import {
   render,
   screen,
@@ -58,6 +58,8 @@ vi.mock("pdfjs-dist", async () => {
   };
 });
 import App from "../src/App";
+
+afterEach(cleanup);
 import { save, getProject } from "../src/io";
 import { newProject, calculate, totals } from "../src/model";
 test("Independent survey PDF → calibrate and verify → measure → client XLSX copy → backup and restore", async () => {
@@ -249,23 +251,7 @@ import {
 import { estimateBook } from "../src/books";
 import { printReportHtml } from "../src/Reports";
 import { writeFileSync } from "node:fs";
-test("Same draft breakdown in numeric XLSX and printable report with actual marked PDF excerpt", async () => {
-  const p = newProject("Disposable Crescent Business Centre", "Lahore");
-  p.revs = (["A", "B"] as const).map((id) => ({
-    id,
-    date: "2026-10-19",
-    frozen: id === "A",
-    sheets: makeSampleSheets(id),
-    items: makeSampleItems(id),
-    rates: makeSampleRates(id),
-    queries: [],
-    approved: [],
-  }));
-  for (const id of ["A", "B"])
-    p.documents[id] = readFileSync(
-      "public/samples/ductledger-rev-" + id.toLowerCase() + ".pdf",
-    ).toString("base64");
-  const [a, b] = p.revs;
+function enableNativeDrawingCrops() {
   // Crop and mark the DOM canvas with a native 2D backing store.
   const nativeFor = (el: any) =>
     el.nativeBitmap ?? (el.nativeBitmap = createCanvas(el.width, el.height));
@@ -291,6 +277,25 @@ test("Same draft breakdown in numeric XLSX and printable report with actual mark
       return nativeFor(this).toDataURL("image/png");
     },
   );
+}
+test("Same draft breakdown in numeric XLSX and printable report with actual marked PDF excerpt", async () => {
+  const p = newProject("Disposable Crescent Business Centre", "Lahore");
+  p.revs = (["A", "B"] as const).map((id) => ({
+    id,
+    date: "2026-10-19",
+    frozen: id === "A",
+    sheets: makeSampleSheets(id),
+    items: makeSampleItems(id),
+    rates: makeSampleRates(id),
+    queries: [],
+    approved: [],
+  }));
+  for (const id of ["A", "B"])
+    p.documents[id] = readFileSync(
+      "public/samples/ductledger-rev-" + id.toLowerCase() + ".pdf",
+    ).toString("base64");
+  const [a, b] = p.revs;
+  enableNativeDrawingCrops();
   for (const status of ["Pending", "Confirmed"]) {
     b.approved = status === "Pending" ? [] : ["SA-001"];
     const confirmed = b.approved.length ? 14800 : 0,
@@ -301,8 +306,8 @@ test("Same draft breakdown in numeric XLSX and printable report with actual mark
     wb.getWorksheet("Variation summary")!.eachRow((row) =>
       summary.set(row.getCell(1).text, row.getCell(2).value),
     );
-    expect(summary.get("Confirmed net variation")).toBe(confirmed);
-    expect(summary.get("Pending net variation")).toBe(pending);
+    expect(summary.get("Confirmed priced subtotal")).toBe(confirmed);
+    expect(summary.get("Pending priced subtotal")).toBe(pending);
     expect(summary.get("Total proposed variation")).toBe(14800);
     expect(wb.worksheets.every((s) => s.getCell("B1").text === "DRAFT")).toBe(
       true,
@@ -315,12 +320,12 @@ test("Same draft breakdown in numeric XLSX and printable report with actual mark
       text = doc.body.textContent!;
     expect(text).toContain("DRAFT");
     expect(text).toContain(
-      "Confirmed net variation · PKR " + confirmed.toLocaleString("en-US"),
+      "Confirmed priced subtotal · PKR " + confirmed.toLocaleString("en-US"),
     );
     expect(text).toContain(
-      "Pending net variation · PKR " + pending.toLocaleString("en-US"),
+      "Pending priced subtotal · PKR " + pending.toLocaleString("en-US"),
     );
-    expect(text).toContain("Total proposed variation · PKR 14,800");
+    expect(text).toContain("Total proposed variation: PKR 14,800");
     expect(text).toContain("SA-001 · Resized · " + status);
     expect(doc.querySelector("img")!.src.length).toBeGreaterThan(1000);
     if (process.env.DUCTLEDGER_QA_OUTPUT)
@@ -378,6 +383,7 @@ test("Evidence on a physically reordered revised PDF renders the paired old and 
     expect(
       screen.getByRole("button", { name: "Confirm" }).hasAttribute("disabled"),
     ).toBe(false),
+    { timeout: 6000 },
   );
   for (const [rev, n] of [
     ["A", 1],
@@ -389,4 +395,348 @@ test("Evidence on a physically reordered revised PDF renders the paired old and 
     expect(svg.querySelector("canvas")!.dataset.renderedPdfBytes).toBeTruthy();
   }
   cleanup();
+});
+
+import { sampleTender } from "../src/sample";
+async function openSampleCopy() {
+  const fetchSample = vi
+    .spyOn(globalThis, "fetch")
+    .mockImplementation(
+      async (url) =>
+        new Response(readFileSync("public" + url), {
+          headers: { "Content-Type": "application/pdf" },
+        }),
+    );
+  const project = await sampleTender();
+  fetchSample.mockRestore();
+  project.name += " (disposable QA)";
+  await save(project);
+  localStorage.setItem("dl-active", project.id);
+  localStorage.setItem("dl-rev", "B");
+  localStorage.setItem("dl-sheet", "M-101");
+  localStorage.setItem("dl-item", "SA-001");
+  const app = render(<App />);
+  await screen.findByRole("heading", { name: "Drawing takeoff" });
+  return { project, app };
+}
+const press = (name: string | RegExp) =>
+  fireEvent.click(screen.getByRole("button", { name, exact: true }));
+function editField(label: string, value: string) {
+  press("Edit item");
+  fireEvent.change(screen.getByLabelText(label), { target: { value } });
+  press("Save item");
+}
+function editMainRate(value: string) {
+  press("BOQ");
+  press("Import rates");
+  press("Edit current rates");
+  const code = screen.getByDisplayValue("GI-MAIN");
+  const rate = within(code.closest("tr")!).getByLabelText("Rate in PKR");
+  fireEvent.change(rate, { target: { value } });
+  press("Apply rates");
+}
+function overview() {
+  return within(screen.getByRole("region", { name: "Variation summary" }));
+}
+function assertOverview(
+  status: string,
+  headline: string,
+  subtotal: string,
+  pending: string,
+  confirmed: string,
+) {
+  const report = overview();
+  expect(
+    report.getByRole("heading", {
+      name: "Total proposed variation: " + headline,
+    }),
+  ).toBeTruthy();
+  expect(report.getByText(status, { selector: "strong" })).toBeTruthy();
+  for (const [label, value] of [
+    ["Priced changes subtotal", subtotal],
+    ["Pending priced subtotal", pending],
+    ["Confirmed priced subtotal", confirmed],
+  ]) {
+    expect(
+      report.getByText(label).parentElement!.querySelector("strong")!
+        .textContent,
+    ).toBe(value);
+  }
+}
+function captureWorkbooks() {
+  let file: Blob | undefined;
+  vi.spyOn(URL, "createObjectURL").mockImplementation((blob: Blob) => {
+    file = blob;
+    return "blob:qa-export";
+  });
+  vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+  return async function downloadWorkbook() {
+    file = undefined;
+    press(/Excel variation workbook/);
+    await waitFor(() => expect(file).toBeDefined());
+    const bytes = await file!.arrayBuffer();
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(bytes);
+    return { bytes, workbook };
+  };
+}
+test("Sample A/D: unmapped, exported, reopened, repaired, confirmed and reloaded", async () => {
+  const { project, app } = await openSampleCopy();
+  enableNativeDrawingCrops();
+  // Supply the native print boundary missing from the DOM test environment.
+  const settings = (window as any).happyDOM.settings;
+  const priorFrameSetting = settings.enableIframePageLoading;
+  settings.enableIframePageLoading = true;
+  const print = vi.fn();
+  const frameDoc = Object.getOwnPropertyDescriptor(
+    HTMLIFrameElement.prototype,
+    "contentDocument",
+  )!.get!;
+  vi.spyOn(
+    HTMLIFrameElement.prototype,
+    "contentDocument",
+    "get",
+  ).mockImplementation(function (this: HTMLIFrameElement) {
+    const doc = frameDoc.call(this);
+    if (doc) doc.defaultView.HTMLImageElement.prototype.decode = async () => {};
+    return doc;
+  });
+  const frameWindow = Object.getOwnPropertyDescriptor(
+    HTMLIFrameElement.prototype,
+    "contentWindow",
+  )!.get!;
+  vi.spyOn(
+    HTMLIFrameElement.prototype,
+    "contentWindow",
+    "get",
+  ).mockImplementation(function (this: HTMLIFrameElement) {
+    const child = frameWindow.call(this);
+    if (child) child.print = print;
+    return child;
+  });
+  const downloadWorkbook = captureWorkbooks();
+  async function exportAndInspect(complete: boolean) {
+    const status = complete ? "Complete" : "Incomplete";
+    const headline = complete ? "PKR 14,800" : "Incomplete";
+    const subtotal = complete ? "PKR 14,800" : "No priced changes yet";
+    press("Export report");
+    const preview = within(screen.getByRole("dialog"));
+    expect(
+      preview.getByRole("heading", {
+        name: "Total proposed variation: " + headline,
+      }),
+    ).toBeTruthy();
+    expect(
+      preview
+        .getByText("Priced changes subtotal")
+        .parentElement!.querySelector("strong")!.textContent,
+    ).toBe(subtotal);
+    expect(
+      preview.getByRole("option", { name: "Final" }).hasAttribute("disabled"),
+    ).toBe(!complete);
+    const { bytes, workbook } = await downloadWorkbook();
+    const summary = new Map<string, unknown>();
+    workbook
+      .getWorksheet("Variation summary")!
+      .eachRow((row) => summary.set(row.getCell(1).text, row.getCell(2).value));
+    expect(summary.get("Pricing status")).toBe(status);
+    expect(summary.get("Total proposed variation")).toBe(
+      complete ? 14800 : null,
+    );
+    expect(summary.get("Priced changes subtotal")).toBe(complete ? 14800 : 0);
+    expect(summary.get("Pending priced subtotal")).toBe(0);
+    expect(summary.get("Confirmed priced subtotal")).toBe(complete ? 14800 : 0);
+    if (!complete) {
+      expect(summary.get("Priced changes")).toBe("No priced changes yet");
+      const issue = workbook.getWorksheet("Outstanding queries")!.getRow(3);
+      expect([issue.getCell(1).text, issue.getCell(2).text]).toEqual([
+        "SA-001",
+        "M-101",
+      ]);
+      expect(issue.getCell(3).text).toContain("Rate missing");
+    }
+    press("Export report");
+    press(/Printable client PDF/);
+    await waitFor(() =>
+      expect(
+        document.querySelector("iframe")?.contentDocument?.body.textContent,
+      ).toContain("Total proposed variation: " + headline),
+    );
+    const frame = document.querySelector("iframe")!;
+    const doc = frame.contentDocument!;
+    expect(doc.body.textContent).toContain("Pricing status: " + status);
+    expect(doc.body.textContent).toContain(
+      "Priced changes subtotal: " + subtotal,
+    );
+    if (!complete) {
+      expect(doc.body.textContent).toContain("1 changed item needs a rate.");
+      expect(doc.body.textContent).toMatch(/SA-001 · M-101 · .*Rate missing/);
+    }
+    expect(doc.querySelector("img")!.src.length).toBeGreaterThan(1000);
+    if (process.env.DUCTLEDGER_QA_OUTPUT) {
+      const path = process.env.DUCTLEDGER_QA_OUTPUT + "/" + status;
+      writeFileSync(path + ".html", doc.documentElement.outerHTML);
+      writeFileSync(path + ".xlsx", Buffer.from(bytes));
+    }
+    await waitFor(() => expect(print).toHaveBeenCalled());
+    print.mockClear();
+    frame.remove();
+  }
+  try {
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: "Select SA-001" }),
+    );
+    editField("BOQ mapping", "");
+    press("Reports");
+    assertOverview(
+      "Incomplete",
+      "Incomplete",
+      "No priced changes yet",
+      "PKR 0",
+      "PKR 0",
+    );
+    expect(overview().getByText("1 changed item needs a rate.")).toBeTruthy();
+    await exportAndInspect(false);
+    press("SA-001 · M-101");
+    expect(
+      app.container.querySelector(".selected-mark")?.getAttribute("data-item"),
+    ).toBe("SA-001");
+    editField("BOQ mapping", "GI-MAIN");
+    press("Reports");
+    assertOverview(
+      "Complete",
+      "PKR 14,800",
+      "PKR 14,800",
+      "PKR 14,800",
+      "PKR 0",
+    );
+    expect(screen.queryByText("1 changed item needs a rate.")).toBeNull();
+    press("Review evidence");
+    const confirm = await screen.findByRole("button", {
+      name: "Confirm",
+      exact: true,
+    });
+    await waitFor(() => expect(confirm.hasAttribute("disabled")).toBe(false));
+    fireEvent.click(confirm);
+    await waitFor(async () =>
+      expect((await getProject(project.id))!.revs[1].approved).toEqual([
+        "SA-001",
+      ]),
+    );
+    cleanup();
+    render(<App />);
+    await screen.findByRole("heading", { name: "Drawing takeoff" });
+    press("Reports");
+    assertOverview(
+      "Complete",
+      "PKR 14,800",
+      "PKR 14,800",
+      "PKR 0",
+      "PKR 14,800",
+    );
+    await exportAndInspect(true);
+    expect((await getProject(project.id))!.revs[0]).toEqual(project.revs[0]);
+  } finally {
+    settings.enableIframePageLoading = priorFrameSetting;
+    cleanup();
+    vi.restoreAllMocks();
+  }
+});
+
+test("Sample B/C: mixed pricing, credit, cancelling changes and an explicit zero rate", async () => {
+  const { project } = await openSampleCopy();
+  const downloadWorkbook = captureWorkbooks();
+  async function checkExport(total: number | null, priced: number) {
+    press("Export report");
+    const preview = within(screen.getByRole("dialog"));
+    expect(
+      preview
+        .getByText("Priced changes subtotal")
+        .parentElement!.querySelector("strong")!.textContent,
+    ).toBe("PKR " + priced.toLocaleString("en-US"));
+    const { workbook } = await downloadWorkbook();
+    const cells = new Map<string, unknown>();
+    workbook
+      .getWorksheet("Variation summary")!
+      .eachRow((row) => cells.set(row.getCell(1).text, row.getCell(2).value));
+    expect(cells.get("Total proposed variation")).toBe(total);
+    expect(cells.get("Pricing status")).toBe(
+      total === null ? "Incomplete" : "Complete",
+    );
+    expect(cells.get("Priced changes subtotal")).toBe(priced);
+  }
+  try {
+    editMainRate("2500");
+    press("Takeoff");
+    press("Next sheet");
+    editField("BOQ mapping", "");
+    press("Reports");
+    assertOverview(
+      "Incomplete",
+      "Incomplete",
+      "PKR 10,000",
+      "PKR 10,000",
+      "PKR 0",
+    );
+    expect(overview().getByText("1 changed item needs a rate.")).toBeTruthy();
+    expect(
+      overview().getByRole("button", { name: "SA-101 · M-102" }),
+    ).toBeTruthy();
+    await checkExport(null, 10000);
+    editMainRate("1250");
+    press("Reports");
+    assertOverview(
+      "Incomplete",
+      "Incomplete",
+      "PKR -20,000",
+      "PKR -20,000",
+      "PKR 0",
+    );
+
+    editMainRate("2500");
+    press("Import rates");
+    fireEvent.change(screen.getByLabelText(/Choose a rate sheet/), {
+      target: {
+        files: [
+          new File(
+            [
+              "Code,Description,Unit,Rate\nQA-BRANCH,Branch tender rate,m2,1950\n",
+            ],
+            "branch.csv",
+          ),
+        ],
+      },
+    });
+    await waitFor(() =>
+      expect(
+        screen
+          .getByRole("button", { name: "Apply rates" })
+          .hasAttribute("disabled"),
+      ).toBe(false),
+    );
+    press("Apply rates");
+    press("Takeoff");
+    editField("BOQ mapping", "QA-BRANCH");
+    press("Previous sheet");
+    editField("Width (mm)", "700");
+    press("Reports");
+    assertOverview("Complete", "PKR 0", "PKR 0", "PKR 0", "PKR 0");
+    expect(overview().getByText(/Priced additions/).textContent).toMatch(
+      /PKR 5,000.*PKR -5,000/,
+    );
+    await checkExport(0, 0);
+    editMainRate("0");
+    press("Reports");
+    assertOverview(
+      "Complete",
+      "PKR -55,000",
+      "PKR -55,000",
+      "PKR -55,000",
+      "PKR 0",
+    );
+    expect((await getProject(project.id))!.revs[0]).toEqual(project.revs[0]);
+  } finally {
+    cleanup();
+    vi.restoreAllMocks();
+  }
 });

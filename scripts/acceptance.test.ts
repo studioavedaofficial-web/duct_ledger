@@ -361,6 +361,11 @@ test("Pending / confirmed money, credits and unit-change legs partition once", a
     confirmed: 0,
     pending: 14800,
     proposed: 14800,
+    status: "Complete",
+    reason: "",
+    unresolved: [],
+    pricedCount: 1,
+    pricedSubtotal: 14800,
     credits: 0,
     additions: 14800,
     unpriced: 0,
@@ -386,4 +391,36 @@ test("Pending / confirmed money, credits and unit-change legs partition once", a
   assert.equal(sum.confirmed, -50000);
   assert.equal(sum.pending, 27000);
   assert.equal(sum.proposed, -23000);
+});
+
+test("Old-side, incompatible-unit and missing-quantity changes retain their unknown amount", async () => {
+  const { reviewTotals, quantityDifference } = await import("../src/model");
+  const a = fixture("A"),
+    b = fixture("B");
+  a.sheets[0].number = "M-101A";
+  a.rates[0].rate = null;
+  const oldMissing = reviewTotals(changes(a, b), b, a);
+  assert.equal(oldMissing.proposed, null);
+  assert.equal(oldMissing.unpriced, 1);
+  assert.equal(oldMissing.unresolved[0].baseline, true);
+  assert.equal(oldMissing.unresolved[0].sheet, "M-101A");
+  a.rates[0].rate = 2500;
+  b.rates[0].unit = "pc";
+  const incompatible = reviewTotals(changes(a, b), b, a);
+  assert.equal(incompatible.proposed, null);
+  assert.match(incompatible.unresolved[0].reason, /Needs remapping/);
+  b.rates[0].unit = "m";
+  b.rates[0].rate = null;
+  const split = reviewTotals(changes(a, b), b, a);
+  assert.equal(split.unpriced, 1);
+  assert.equal(split.pricedCount, 0);
+  assert.equal(split.pricedSubtotal, 0);
+  b.rates[0].unit = "m²";
+  b.rates[0].rate = 2500;
+  b.items[0].width = null;
+  const [missingQty] = changes(a, b);
+  assert.equal(quantityDifference(missingQty), null);
+  b.items[0].width = a.items[0].width;
+  b.items[0].review = true;
+  assert.equal(reviewTotals(changes(a, b), b, a).proposed, null);
 });

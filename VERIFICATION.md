@@ -1,5 +1,19 @@
 # Verification report
 
+## Missing-rate reporting
+
+Verified on fresh, disposable copies of the Crescent Business Centre sample. The original fault was reproduced by saving an unmapped SA-001 in Revision B and reopening the exported workbook. Both Reports and the workbook gave an overall total of zero.
+
+| Case | Verified result |
+| --- | --- |
+| Missing rate | Reports and export preview show Incomplete. The warning identifies SA-001 on M-101 and opens the selected duct. The workbook has a blank numeric overall-total cell, numeric zero subtotals and a reason in Outstanding queries. The printable PDF names the same duct, sheet and reason and says “No priced changes yet”. Final issue is blocked. |
+| Mixed pricing | One +PKR 10,000 change and an unmapped SA-101 on M-102 give a PKR 10,000 priced subtotal and an incomplete total. Changing the priced item to a PKR 20,000 credit preserves the negative subtotal. |
+| Genuine zero | Fully priced changes of +PKR 5,000 and −PKR 5,000 give Complete and a numeric workbook total of zero. An explicitly entered GI-MAIN rate of zero gives a priced credit. |
+| Recovery | Restoring GI-MAIN at PKR 2,700/m² gives PKR 14,800 pending. Confirming and reloading from IndexedDB gives PKR 14,800 confirmed and zero pending. Final issue is available and frozen Revision A matches its starting data. |
+
+The UI tests exercise the React app, its normal controls, IndexedDB, the Excel download and the printable report. Both exported workbooks were reopened. Both print documents were rendered to PDF using PyMuPDF and inspected for amounts, status, item details and the marked drawing. The operating system’s interactive print dialog was outside these automated checks.
+
+
 ## Review and pricing fixes
 
 All six requested acceptance cases passed in the automated checks. Testing used disposable Crescent Business Centre projects and a separately generated workshop drawing and workbook. Existing user projects were not used as test data.
