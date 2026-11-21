@@ -1,55 +1,69 @@
-import { useEffect,useRef,useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
-Layers3,Table2,
-GitCompareArrows,
-FileChartColumn,
-FolderOpen,
-ChevronDown,
-ChevronRight,
-Check,
-MapPin,
-Download,
-Plus,
-FileStack,HardDrive,Folder,
-Box,Ruler,Info,
-HelpCircle,LockKeyhole,
-FileUp,TriangleAlert,MessageSquare
+  Layers3,
+  Table2,
+  GitCompareArrows,
+  FileChartColumn,
+  FolderOpen,
+  ChevronDown,
+  ChevronRight,
+  Check,
+  MapPin,
+  Download,
+  Plus,
+  FileStack,
+  HardDrive,
+  Folder,
+  Box,
+  Ruler,
+  Info,
+  HelpCircle,
+  LockKeyhole,
+  FileUp,
+  TriangleAlert,
+  MessageSquare,
 } from "lucide-react";
 import {
-allProjects,
-getProject,
-save,
-validateProject,
-download,
-importPDF,
-thumbnail,
+  allProjects,
+  getProject,
+  save,
+  validateProject,
+  download,
+  importPDF,
+  thumbnail,
 } from "./io";
 import {
-pairSheets,
-today,
-uid,
-newProject,
-newItem,
-changes,totals,
-exceptions,
-fmt,
-distance,
-kinds,
-piece,
-type Project,
-type Rev,
-type Sheet,
-type Item,
-type Pt,
-type Kind
+  pairSheets,
+  today,
+  uid,
+  newProject,
+  newItem,
+  changes,
+  totals,
+  keepValidApprovals,
+  reviewTotals,
+  finalChecks,
+  sheetLabel,
+  confirmed,
+  type Change,
+  fmt,
+  distance,
+  kinds,
+  piece,
+  type Project,
+  type Rev,
+  type Sheet,
+  type Item,
+  type Pt,
+  type Kind,
 } from "./model";
 import { sampleTender } from "./sample";
 import { sampleThumbnails } from "./sampleLayout";
-import { DrawingCanvas,type Tool } from "./Canvas";
-import { Modal,Mark,Choice,Field,Empty } from "./ui";
-import { Inspector,ItemForm } from "./Inspector";
-import { BOQ,Metric,ReviewTable,Compare,ExportDialog } from "./Reports";
-import { RatesDialog,ClientDialog } from "./Imports";
+import { DrawingCanvas, type Tool } from "./Canvas";
+import { Modal, Mark, Choice, Field, Empty } from "./ui";
+import { Inspector, ItemForm } from "./Inspector";
+import { BOQ, Metric, ReviewTable, Compare, ExportDialog } from "./Reports";
+import { RatesDialog, ClientDialog } from "./Imports";
 import "./style.css";
 const tabs = [
   ["Takeoff", Layers3],
@@ -101,6 +115,8 @@ export default function App() {
     [sheetId, setS] = useState(""),
     [itemId, setI] = useState(""),
     [view, setView] = useState<View>("Takeoff"),
+    [reviewSheet, setReviewSheet] = useState<string | null>(null),
+    [reviewKey, setReviewKey] = useState(""),
     [dialog, D] = useState(""),
     [tool, toolSet] = useState<Tool>("Select"),
     [kind, K] = useState<Kind>("Rectangular duct"),
@@ -245,12 +261,11 @@ export default function App() {
     redoStack.current = [];
     persist(next);
   }
-  function mutate(fn: (rr: Rev) => void, changedId?: string) {
+  function mutate(fn: (rr: Rev) => void) {
+    if (!r) return;
     commit((rr) => {
       fn(rr);
-      rr.approved = changedId
-        ? rr.approved.filter((id) => id !== changedId)
-        : [];
+      rr.approved = keepValidApprovals(r, rr, old);
     });
   }
   function undo(redo = false) {
@@ -269,6 +284,8 @@ export default function App() {
     toolSet("Select");
   }
   function chooseRev(rr: Rev) {
+    setReviewSheet(null);
+    setReviewKey("");
     setR(rr.id);
     const sh = rr.sheets.find((x) => x.id === s?.id) ?? rr.sheets[0];
     if (sh) chooseSheet(sh, rr);
@@ -318,7 +335,7 @@ export default function App() {
     if (tool === "Redraw" && item) {
       mutate((rr) => {
         rr.items.find((x) => x.id === item.id)!.pts = pts;
-      }, item.id);
+      });
       toolSet("Select");
       return;
     }
@@ -400,8 +417,7 @@ export default function App() {
       </div>
     );
   const changed = changes(old, r),
-    issues = exceptions(r),
-    unconfirmed = changed.filter((c) => !r.approved.includes(c.id)),
+    unconfirmed = changed.filter((c) => !confirmed(r, c)),
     confirm = (id: string) =>
       commit((rr) => {
         rr.approved = Array.from(new Set([...rr.approved, id]));
@@ -409,11 +425,47 @@ export default function App() {
     query = r.queries.find((q) => q.id === qId),
     editItem = createdItem ?? item;
   const selectView = (v: View) => {
+    setReviewSheet(null);
+    setReviewKey("");
     setView(v);
     W(false);
     toolSet("Select");
   };
-  const priceSum = changed.reduce((a, x) => a + (x.delta ?? 0), 0);
+  const sheetOptions = [
+    ...r.sheets,
+    ...(old?.sheets ?? []).filter((o) => !r.sheets.some((n) => n.id === o.id)),
+  ];
+  const filter = reviewSheet ?? s?.id ?? sheetOptions[0]?.id;
+  const currentSheet = sheetOptions.find((v) => v.id === filter);
+  const shown =
+    view === "Reports" || filter === "*"
+      ? changed
+      : changed.filter(
+          (c) => c.oldSheetId === filter || c.newSheetId === filter,
+        );
+  const reviewing = changed.find(
+    (c) => c.key === reviewKey && c.sheetId === filter,
+  );
+  const newItemEvidence = reviewing?.next
+    ? r.items.find((i) => i.id === reviewing.id)
+    : undefined;
+  const oldItemEvidence = reviewing?.old
+    ? old?.items.find((i) => i.id === reviewing.id)
+    : undefined;
+  const newSheet = r.sheets.find(
+      (s) => s.id === (newItemEvidence?.sheet ?? filter),
+    ),
+    oldSheet = old?.sheets.find(
+      (s) => s.id === (oldItemEvidence?.sheet ?? filter),
+    );
+  const money = reviewTotals(changed, r),
+    checks = finalChecks(r, changed);
+  function openEvidence(c: Change) {
+    setView("Revisions");
+    setReviewSheet(c.sheetId);
+    setReviewKey(c.key);
+  }
+
   return (
     <div className="app">
       <header className="topbar">
@@ -670,77 +722,117 @@ export default function App() {
                     value={old ? "Revision " + old.id : "Original tender"}
                   />
                   <Metric
-                    title="Changed lines"
+                    title="Changed lines · project"
                     value={String(changed.length)}
                   />
                   <Metric
-                    title="Awaiting confirmation"
+                    title="Pending changes · project"
                     value={String(unconfirmed.length)}
                   />
                 </>
               ) : (
                 <>
                   <Metric
-                    title="Additions"
-                    value={
-                      "PKR " +
-                      fmt(
-                        changed.reduce(
-                          (a, x) => a + Math.max(0, x.delta ?? 0),
-                          0,
-                        ),
-                      )
-                    }
+                    title="Confirmed net variation"
+                    value={"PKR " + fmt(money.confirmed)}
                   />
                   <Metric
-                    title="Credits"
-                    value={
-                      "PKR " +
-                      fmt(
-                        changed.reduce(
-                          (a, x) => a + Math.min(0, x.delta ?? 0),
-                          0,
-                        ),
-                      )
-                    }
+                    title="Pending net variation"
+                    value={"PKR " + fmt(money.pending)}
                   />
                   <Metric
-                    title="Net priced variation"
-                    value={"PKR " + fmt(priceSum)}
+                    title="Total proposed variation"
+                    value={"PKR " + fmt(money.proposed)}
                   />
                 </>
               )}
             </div>
-            {view === "Revisions" && old && (
-              <Compare
-                p={p}
-                r={r}
-                old={old}
-                saveAlign={(id, m) =>
-                  commit((rr) => (rr.alignment = { ...rr.alignment, [id]: m }))
-                }
-              />
+            {view === "Reports" && (
+              <p className="quiet">
+                Proposed additions · PKR {fmt(money.additions)}　 Credits · PKR{" "}
+                {fmt(money.credits)}
+                {money.unpriced > 0 &&
+                  " · " + money.unpriced + " unpriced change(s) excluded"}
+              </p>
             )}
-            <h3>Detailed changes</h3>
-            <ReviewTable r={r} old={old} go={go} confirm={confirm} />
+            {view === "Revisions" && old && (
+              <>
+                <Choice
+                  aria-label="Comparison sheet"
+                  value={filter ?? "*"}
+                  onChange={(e) => {
+                    setReviewSheet(e.target.value);
+                    setReviewKey("");
+                  }}
+                >
+                  {sheetOptions.map((sh) => (
+                    <option key={sh.id} value={sh.id}>
+                      {sheetLabel(sh)}
+                    </option>
+                  ))}
+                  <option value="*">All sheets</option>
+                </Choice>
+                {filter !== "*" && (
+                  <Compare
+                    key={JSON.stringify([
+                      p.id,
+                      r.id,
+                      filter,
+                      reviewing?.key,
+                      oldSheet?.doc,
+                      oldSheet?.page,
+                      newSheet?.doc,
+                      newSheet?.page,
+                    ])}
+                    p={p}
+                    r={r}
+                    old={old}
+                    a={oldSheet}
+                    b={newSheet}
+                    change={reviewing}
+                    confirm={confirm}
+                    saveAlign={(id, m) =>
+                      commit(
+                        (rr) => (rr.alignment = { ...rr.alignment, [id]: m }),
+                      )
+                    }
+                  />
+                )}
+              </>
+            )}
             <h3>
-              Outstanding checks{" "}
-              <span className="count">
-                {issues.length + unconfirmed.length}
-              </span>
+              Detailed changes{" "}
+              <small>
+                {view === "Reports" || filter === "*"
+                  ? "All sheets"
+                  : "Selected sheet"}{" "}
+                · {shown.length}
+              </small>
             </h3>
-            {[
-              ...issues,
-              ...unconfirmed.map(
-                (c) => c.id + " · Awaiting change confirmation",
-              ),
-            ].map((i, n) => (
+            <ReviewTable
+              r={r}
+              old={old}
+              rows={shown}
+              go={go}
+              evidenceOnly={view === "Revisions"}
+              review={openEvidence}
+              empty={
+                currentSheet && view === "Revisions"
+                  ? "No changes on " + sheetLabel(currentSheet) + "."
+                  : "No changes recorded for this revision."
+              }
+            />
+            <h3>
+              Outstanding checks · project{" "}
+              <span className="count">{checks.length}</span>
+            </h3>
+            {checks.map((text, n) => (
               <p key={n} className="checkline">
                 <TriangleAlert size={14} />
-                {i}
+                {text}
               </p>
             ))}
-            {!issues.length && !unconfirmed.length && (
+            {!checks.length && (
               <p className="readystatus">
                 <Check size={15} />
                 All checks resolved
@@ -957,7 +1049,7 @@ export default function App() {
               const n = rr.items.findIndex((o) => o.id === i.id);
               if (n < 0) rr.items.push(i);
               else rr.items[n] = i;
-            }, i.id);
+            });
             setI(i.id);
             close();
             notify("Item saved");
@@ -992,7 +1084,6 @@ export default function App() {
               onClick={() => {
                 mutate(
                   (rr) => (rr.items = rr.items.filter((i) => i.id !== item.id)),
-                  item.id,
                 );
                 setI("");
                 close();
@@ -1363,7 +1454,7 @@ export default function App() {
             Freeze this revision’s drawings, rates, assumptions and priced
             quantities at PKR {fmt(totals(r))}.
           </p>
-          {(!r.items.length || issues.length > 0 || unconfirmed.length > 0) && (
+          {(!r.items.length || checks.length > 0) && (
             <div className="issue">
               Complete takeoff, resolve exceptions and confirm each change
               before approval.
@@ -1375,9 +1466,7 @@ export default function App() {
             </button>
             <button
               className="primary"
-              disabled={
-                !r.items.length || !!issues.length || !!unconfirmed.length
-              }
+              disabled={!r.items.length || !!checks.length}
               onClick={() => {
                 commit((rr) => (rr.frozen = true), true);
                 close();

@@ -92,7 +92,9 @@ test("E · unresolved calibration, rates, unit, mapping, and explicit zero", () 
   assert.equal(calculate(i, r).amount, null);
   assert.ok(calculate(i, r).errors.includes("Rate missing"));
   rate.unit = "pc";
-  assert.ok(calculate(i, r).errors.includes("Incompatible rate unit"));
+  assert.ok(
+    calculate(i, r).errors.some((e) => e.startsWith("Needs remapping")),
+  );
   i.code = "unknown";
   assert.ok(calculate(i, r).errors.includes("BOQ mapping unresolved"));
   rate.unit = "m²";
@@ -251,4 +253,137 @@ test("F · physical PDF page reordering keeps measured items linked to the paire
   assert.equal(calculate(rev.items[0], rev).length, 10);
   assert.equal(calculate(rev.items[0], rev).amount, 64800);
   await doc.destroy();
+});
+test("Crescent baseline and GI-RA reconcile from exact numeric workbook lines", async () => {
+  const a = fixture("A"),
+    b = fixture("B"),
+    p = newProject("Disposable Crescent", "Lahore");
+  p.revs = [a, b];
+  const snapshot = JSON.stringify(a),
+    g = boq(b).find((g) => g.code === "GI-RA")!;
+  assert.equal(totals(a), 249971.26);
+  assert.equal(totals(b), 264771.26);
+  assert.deepEqual(
+    g.lines.map((l) => l.calc.quantity),
+    [17.29, 2.1875, 17.29, 2.1875],
+  );
+  assert.equal(g.quantity, 38.955);
+  assert.deepEqual(
+    g.lines.map((l) => l.calc.amount),
+    [37173.5, 4703.13, 37173.5, 4703.13],
+  );
+  assert.equal(g.amount, 83753.26);
+  const w = new ExcelJS.Workbook();
+  await w.xlsx.load(await estimateBook(p, b, a, true));
+  const line = w
+    .getWorksheet("BOQ")!
+    .getRows(3, 7)!
+    .find((row) => row.getCell(1).value === "GI-RA")!;
+  assert.equal(line.getCell(3).value, 38.955);
+  assert.equal(line.getCell(5).value, 83753.26);
+  let cents = 0;
+  w.getWorksheet("Estimate")!.eachRow((row) => {
+    if (row.getCell(8).value !== "GI-RA") return;
+    const [q, rate, amount] = [15, 17, 18].map((col) => row.getCell(col).value);
+    assert.equal(typeof q, "number");
+    assert.equal(typeof rate, "number");
+    assert.equal(typeof amount, "number");
+    assert.equal(Number((Number(q) * Number(rate)).toFixed(2)), amount);
+    cents += Math.round(Number(amount) * 100);
+  });
+  assert.equal(cents / 100, line.getCell(5).value);
+  assert.equal(JSON.stringify(a), snapshot);
+});
+test("Mixed rates are disclosed and unresolved lines stay out of priced subtotals", async () => {
+  const a = fixture("A"),
+    r = fixture("B"),
+    p = newProject("Mixed", "Lahore");
+  p.revs = [a, r];
+  const it = r.items.find((i) => i.id === "RA-002")!;
+  it.groupCode = "GI-RA";
+  it.code = "RA-ALT";
+  r.rates.push({
+    code: it.code,
+    description: "Insulated branch",
+    unit: "m²",
+    rate: 2600,
+  });
+  let g = boq(r).find((g) => g.code === "GI-RA")!;
+  assert.equal(g.mixedRates, true);
+  assert.equal(g.unitRate, null);
+  assert.equal(g.lines[1].calc.rate, 2600);
+  const w = new ExcelJS.Workbook();
+  await w.xlsx.load(await estimateBook(p, r, a, true));
+  const excel = w
+    .getWorksheet("BOQ")!
+    .getRows(3, 7)!
+    .find((v) => v.getCell(1).value === "GI-RA")!;
+  assert.equal(excel.getCell(6).value, "Mixed rates");
+  assert.equal(excel.getCell(5).value, g.amount);
+  r.rates.at(-1)!.rate = null;
+  g = boq(r).find((g) => g.code === "GI-RA")!;
+  assert.equal(g.excluded, 1);
+  assert.equal(g.amount, 79050.13);
+  assert.equal(calculate(it, r).amount, null);
+  r.rates.at(-1)!.rate = 0;
+  assert.equal(calculate(it, r).amount, 0);
+  assert.equal(boq(r).find((g) => g.code === "GI-RA")!.excluded, 0);
+});
+test("Real commercial units stay distinct while equivalent spellings agree", async () => {
+  const { pricingUnit, mappingIssue, normalizeUnit, finalChecks } =
+    await import("../src/model");
+  const r = fixture("B"),
+    i = r.items[0];
+  assert.equal(pricingUnit(i, r), "m²");
+  for (const u of ["m²", "m2", "sqm"])
+    assert.equal(mappingIssue("m²", { ...r.rates[0], unit: u as any }), "");
+  for (const u of ["pc", "pcs", "piece"]) assert.equal(normalizeUnit(u), "pc");
+  for (const u of ["m", "pcs"])
+    assert.match(
+      mappingIssue("m²", { ...r.rates[0], unit: u as any }),
+      /Needs remapping/,
+    );
+  i.pricingUnit = "m²";
+  r.rates[0].unit = "m";
+  assert.equal(calculate(i, r).amount, null);
+  assert.ok(finalChecks(r, []).some((m) => m.includes("Needs remapping")));
+  i.pricingUnit = "m";
+  assert.equal(calculate(i, r).quantity, 10);
+  assert.equal(calculate(i, r).amount, 27000);
+});
+test("Pending / confirmed money, credits and unit-change legs partition once", async () => {
+  const { reviewTotals, keepValidApprovals } = await import("../src/model");
+  const a = fixture("A"),
+    b = fixture("B"),
+    rows = changes(a, b);
+  assert.deepEqual([rows[0].scope, rows[0].rate], [10000, 4800]);
+  assert.deepEqual(reviewTotals(rows, b), {
+    confirmed: 0,
+    pending: 14800,
+    proposed: 14800,
+    credits: 0,
+    additions: 14800,
+    unpriced: 0,
+  });
+  b.approved = [rows[0].key];
+  assert.equal(reviewTotals(rows, b).confirmed, 14800);
+  const edit = structuredClone(b);
+  edit.items[0].width = 850;
+  assert.deepEqual(keepValidApprovals(b, edit, a), []);
+  const priceEdit = structuredClone(b);
+  priceEdit.rates[0].rate = 2800;
+  assert.deepEqual(keepValidApprovals(b, priceEdit, a), []);
+  assert.deepEqual(keepValidApprovals(b, structuredClone(b), a), ["SA-001"]);
+  const unrelated = structuredClone(b);
+  unrelated.rates.find((v) => v.code === "FT-EL")!.rate = 999;
+  assert.deepEqual(keepValidApprovals(b, unrelated, a), ["SA-001"]);
+  const u = fixture("B");
+  u.rates[0].unit = "m";
+  const legs = changes(a, u);
+  assert.equal(legs.length, 2);
+  u.approved = [legs[0].key];
+  const sum = reviewTotals(legs, u);
+  assert.equal(sum.confirmed, -50000);
+  assert.equal(sum.pending, 27000);
+  assert.equal(sum.proposed, -23000);
 });

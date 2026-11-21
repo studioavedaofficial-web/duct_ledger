@@ -2,27 +2,20 @@ import ExcelJS from "exceljs";
 import JSZip from "jszip";
 import Papa from "papaparse";
 import {
-quantityExplanation,
-boq,
-calculate,
-changes,
-exceptions,
-round,
-totals,
-type Project,
-type Rev,
-type Unit,
+  finalChecks,
+  confirmed,
+  reviewTotals,
+  moneyPolicy,
+  sheetLabel,
+  quantityExplanation,
+  boq,
+  calculate,
+  changes,
+  totals,
+  type Project,
+  type Rev,
 } from "./model";
-export function normalizeUnit(v: string): Unit | null {
-  const text = v.trim().toLowerCase();
-  return ["m²", "m2", "sqm", "m^2"].includes(text)
-    ? "m²"
-    : ["m", "metre", "meter", "rm"].includes(text)
-      ? "m"
-      : ["pc", "pcs", "piece", "ea", "no", "nos"].includes(text)
-        ? "pc"
-        : null;
-}
+export { normalizeUnit } from "./model";
 export async function readRateRows(file: File): Promise<string[][]> {
   if (file.name.toLowerCase().endsWith(".csv")) {
     const result = Papa.parse<string[]>(await file.text(), {
@@ -141,10 +134,10 @@ export async function estimateBook(
 ) {
   const wb = new ExcelJS.Workbook(),
     issue = draft ? "DRAFT" : "FINAL",
-    rows = changes(old, r),
-    open = exceptions(r);
-  if (!draft && (open.length || rows.some((x) => !r.approved.includes(x.id))))
-    throw new Error("Resolve exceptions and confirm changes before issue");
+    rows = changes(old, r);
+  const checks = finalChecks(r, rows),
+    money = reviewTotals(rows, r);
+  if (!draft && checks.length) throw Error(checks.join(" · "));
   function add(
     name: string,
     cols: string[],
@@ -189,6 +182,7 @@ export async function estimateBook(
       "Amount PKR",
       "Exceptions",
       "Quantity calculation",
+      "BOQ roll-up",
     ],
     r.items.map((i) => {
       const c = calculate(i, r),
@@ -214,37 +208,49 @@ export async function estimateBook(
         c.amount,
         c.errors.join(", "),
         quantityExplanation(i, r),
+        i.groupCode || i.code,
       ];
     }),
   );
   add(
     "BOQ",
-    ["Code", "Description", "Quantity", "Unit", "Amount PKR"],
+    [
+      "Code",
+      "Description",
+      "Exact priced quantity",
+      "Unit",
+      "Priced subtotal PKR",
+      "Unit rate PKR",
+      "Excluded items",
+      "Calculation policy",
+    ],
     boq(r).map((g) => [
       g.code,
       g.rate?.description,
       g.quantity,
-      g.rate?.unit,
+      g.unit,
       g.amount,
+      g.mixedRates ? "Mixed rates" : g.unitRate,
+      g.excluded,
+      moneyPolicy,
     ]),
   );
   add(
     "Variation summary",
-    ["Metric", "PKR"],
+    ["Metric", "Value", "Unit"],
     [
-      ["Baseline priced subtotal", old ? totals(old) : 0],
-      ["New priced subtotal", totals(r)],
+      ["Baseline priced subtotal", old ? totals(old) : 0, "PKR"],
+      ["New priced subtotal", totals(r), "PKR"],
+      ["Additions", money.additions, "PKR"],
+      ["Credits", money.credits, "PKR"],
+      ["Total proposed variation", money.proposed, "PKR"],
+      ["Confirmed net variation", money.confirmed, "PKR"],
+      ["Pending net variation", money.pending, "PKR"],
+      ["Unpriced changes excluded (count)", money.unpriced, "changes"],
       [
-        "Additions",
-        round(rows.reduce((a, x) => a + Math.max(0, x.delta ?? 0), 0)),
-      ],
-      [
-        "Credits",
-        round(rows.reduce((a, x) => a + Math.min(0, x.delta ?? 0), 0)),
-      ],
-      [
-        "Net priced variation",
-        round(rows.reduce((a, x) => a + (x.delta ?? 0), 0)),
+        "Unresolved estimate items excluded (count)",
+        r.items.filter((i) => calculate(i, r).amount === null).length,
+        "items",
       ],
     ],
   );
@@ -275,11 +281,12 @@ export async function estimateBook(
     rows.map((x) => [
       x.id,
       x.description,
-      old?.sheets.find(
-        (s) => s.id === old.items.find((i) => i.id === x.id)?.sheet,
-      )?.number,
-      r.sheets.find((s) => s.id === r.items.find((i) => i.id === x.id)?.sheet)
-        ?.number,
+      x.oldSheetId
+        ? sheetLabel(old?.sheets.find((s) => s.id === x.oldSheetId))
+        : "",
+      x.newSheetId
+        ? sheetLabel(r.sheets.find((s) => s.id === x.newSheetId))
+        : "",
       x.old?.quantity,
       x.old?.unit,
       x.old?.rate,
@@ -291,7 +298,7 @@ export async function estimateBook(
       x.scope,
       x.rate,
       x.delta,
-      r.approved.includes(x.id) ? "Confirmed" : "Review",
+      confirmed(r, x) ? "Confirmed" : "Pending",
       [old?.date, r.date].join(" / "),
       (x.next?.quantity ?? 0) - (x.old?.quantity ?? 0),
       x.old && old
@@ -318,12 +325,24 @@ export async function estimateBook(
         q.text,
         q.response,
       ]),
-      ...open.map((e) => ["", "", "", e]),
-      ...rows
-        .filter((x) => !r.approved.includes(x.id))
-        .map((x) => [x.id, "", "Change awaiting confirmation", ""]),
+      ...checks
+        .filter((e) => !r.queries.some((q) => e === q.id + " · " + q.text))
+        .map((e) => ["", "", "Exception", e]),
     ],
   );
+  for (const [name, cols, format] of [
+    ["Estimate", [13, 15], "0.######"],
+    ["Estimate", [18], "#,##0.00"],
+    ["BOQ", [3], "0.######"],
+    ["BOQ", [5], "#,##0.00"],
+    ["Detailed changes", [5, 9], "0.######"],
+    ["Detailed changes", [8, 12, 13, 14, 15], "#,##0.00"],
+  ] as const) {
+    const ws = wb.getWorksheet(name)!;
+    ws.eachRow((row, n) => {
+      if (n > 2) for (const col of cols) row.getCell(col).numFmt = format;
+    });
+  }
   if (typeof window !== "undefined") {
     function link(sheet: string, row: number, id: string, revision: string) {
       const url = new URL(window.location.pathname, window.location.origin);

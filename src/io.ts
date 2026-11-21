@@ -1,7 +1,15 @@
 import { openDB } from "idb";
-import { getDocument,GlobalWorkerOptions } from "pdfjs-dist";
+import { getDocument, GlobalWorkerOptions } from "pdfjs-dist";
 import worker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
-import { kinds,piece,uid,type Project,type Sheet,type Rev } from "./model";
+import {
+  normalizeUnit,
+  kinds,
+  piece,
+  uid,
+  type Project,
+  type Sheet,
+  type Rev,
+} from "./model";
 GlobalWorkerOptions.workerSrc = worker;
 const db = openDB("ductledger-local-v1", 1, {
   upgrade(db) {
@@ -193,6 +201,8 @@ export async function validateProject(raw: unknown): Promise<Project> {
       if (
         !r.sheets.some((s) => s.id === i.sheet) ||
         !kinds.includes(i.kind) ||
+        (i.pricingUnit !== undefined && !normalizeUnit(i.pricingUnit)) ||
+        (i.groupCode !== undefined && typeof i.groupCode !== "string") ||
         !Array.isArray(i.pts) ||
         i.pts.length < (piece(i.kind) || i.kind === "Vertical riser" ? 1 : 2) ||
         !i.pts.every(
@@ -212,7 +222,7 @@ export async function validateProject(raw: unknown): Promise<Project> {
     for (const v of r.rates)
       if (
         typeof v.code !== "string" ||
-        !["m²", "m", "pc"].includes(v.unit) ||
+        !normalizeUnit(v.unit) ||
         typeof v.description !== "string" ||
         (v.rate !== null && (!Number.isFinite(v.rate) || v.rate < 0))
       )

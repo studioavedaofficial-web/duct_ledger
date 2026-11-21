@@ -1,23 +1,30 @@
 import { useState } from "react";
 import {
-SlidersHorizontal,
-Box,
-Pencil,
-Ruler,
-Calculator,
-ChevronDown,Table2,Trash2,
-Focus
+  SlidersHorizontal,
+  Box,
+  Pencil,
+  Ruler,
+  Calculator,
+  ChevronDown,
+  Table2,
+  Trash2,
+  Focus,
 } from "lucide-react";
 import {
-calculate,
-fmt,
-kinds,
-piece,
-type Item,
-type Rev,
-type Kind,
+  calculate,
+  pricingUnit,
+  mappingIssue,
+  quantityExplanation,
+  normalizeUnit,
+  type Unit,
+  fmt,
+  kinds,
+  piece,
+  type Item,
+  type Rev,
+  type Kind,
 } from "./model";
-import { Field,Choice,Modal,IconButton,Empty } from "./ui";
+import { Field, Choice, Modal, IconButton, Empty } from "./ui";
 export function Inspector({
   r,
   item,
@@ -131,13 +138,13 @@ export function Inspector({
           <div className="keyrow">
             <span>Priced quantity</span>
             <b>
-              {fmt(c.quantity)} {c.unit}
+              {fmt(c.quantity, 6)} {c.unit}
             </b>
           </div>
           <div className="keyrow">
             <span>Unit rate</span>
             <b>
-              {fmt(c.rate)} <small>PKR/{c.unit}</small>
+              {c.rate ?? "—"} <small>PKR/{c.unit}</small>
             </b>
           </div>
           <div className="amountbox">
@@ -150,27 +157,7 @@ export function Inspector({
             <ChevronDown size={14} />
             {detail ? "Hide" : "Show"} calculation
           </button>
-          {detail && (
-            <p className="formula">
-              {f
-                ? item.count + " pieces"
-                : item.kind === "Circular duct"
-                  ? "π × " +
-                    fmt(item.diameter) +
-                    " / 1,000 × " +
-                    fmt(c.length) +
-                    " m"
-                  : "2 × (" +
-                    fmt(item.width) +
-                    " + " +
-                    fmt(item.height) +
-                    ") / 1,000 × " +
-                    fmt(c.length) +
-                    " m"}
-              {!f && " = " + fmt(c.area) + " m²"}. {fmt(c.quantity)} {c.unit} ×
-              PKR {fmt(c.rate)}/{c.unit} = PKR {fmt(c.amount)}.
-            </p>
-          )}
+          {detail && <p className="formula">{quantityExplanation(item, r)}</p>}
           {c.errors.map((e) => (
             <div key={e} className="issue">
               {e}
@@ -218,10 +205,22 @@ export function ItemForm({
   remove: () => void;
   redraw: () => void;
 }) {
-  const [x, set] = useState(structuredClone(item));
+  const [x, set] = useState<Item>({
+    ...structuredClone(item),
+    pricingUnit: pricingUnit(item, r),
+  });
   function f<K extends keyof Item>(k: K, v: Item[K]) {
     set({ ...x, [k]: v });
   }
+  const unit = pricingUnit(x, r);
+  const invalid = (code: string) =>
+    code
+      ? mappingIssue(
+          unit,
+          r.rates.find((v) => v.code === code),
+        )
+      : "";
+  const issue = invalid(x.code) || invalid(x.groupCode ?? "");
   const numeric = (
     k: "width" | "height" | "diameter" | "rise" | "count" | "waste",
     label: string,
@@ -243,6 +242,7 @@ export function ItemForm({
       <form
         onSubmit={(e) => {
           e.preventDefault();
+          if (issue) return;
           submit({ ...x, review: false });
         }}
       >
@@ -295,11 +295,56 @@ export function ItemForm({
           {x.kind === "Vertical riser" &&
             numeric("rise", "Vertical length (m)")}
           {!piece(x.kind) && numeric("waste", "Material waste (%)")}
+          <Field label="Pricing unit">
+            <Choice
+              value={unit}
+              onChange={(e) => f("pricingUnit", e.target.value as Unit)}
+            >
+              {(piece(x.kind) ? ["pc"] : ["m²", "m"]).map((u) => (
+                <option key={u}>{u}</option>
+              ))}
+            </Choice>
+          </Field>
           <Field label="BOQ mapping">
             <Choice value={x.code} onChange={(e) => f("code", e.target.value)}>
               <option value="">Unmapped</option>
+              {x.code && !r.rates.some((v) => v.code === x.code) && (
+                <option value={x.code}>{x.code} · missing</option>
+              )}
               {r.rates.map((v) => (
-                <option key={v.code} value={v.code}>
+                <option
+                  key={v.code}
+                  value={v.code}
+                  disabled={!!mappingIssue(unit, v)}
+                >
+                  {v.code} · {normalizeUnit(v.unit) ?? v.unit}
+                </option>
+              ))}
+            </Choice>
+          </Field>
+          <p
+            className={issue ? "issue" : "quiet"}
+            style={{ gridColumn: "1 / -1" }}
+          >
+            {issue ||
+              "Only " +
+                unit +
+                " rates match this item. Rates in " +
+                ["m", "m²", "pc"].filter((u) => u !== unit).join(" and ") +
+                " are unavailable."}
+          </p>
+          <Field label="BOQ roll-up">
+            <Choice
+              value={x.groupCode ?? ""}
+              onChange={(e) => f("groupCode", e.target.value || undefined)}
+            >
+              <option value="">Use mapped rate code</option>
+              {r.rates.map((v) => (
+                <option
+                  key={v.code}
+                  value={v.code}
+                  disabled={!!mappingIssue(unit, v)}
+                >
                   {v.code} · {v.unit}
                 </option>
               ))}
@@ -334,7 +379,9 @@ export function ItemForm({
             <Focus size={15} />
             Redraw
           </button>
-          <button className="primary">Save item</button>
+          <button className="primary" disabled={!!issue}>
+            Save item
+          </button>
         </div>
       </form>
     </Modal>

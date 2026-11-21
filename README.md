@@ -40,8 +40,8 @@ Select **SA-001** on **M-101**. Revision B shows an 800 × 400 mm rectangular du
 4. In **BOQ → Import rates**, choose a CSV or the first worksheet of an XLSX file. Map columns, review prices and correct flagged rows. Each code has one commercial unit and a material or labour basis. Map items to rate codes in the inspector. Expand a grouped BOQ row to see its source items.
 5. Resolve exceptions, then **Approve & freeze** Revision A in **Revisions**. This locks its drawings, geometry, calibration, rates, waste assumptions and quantities.
 6. From the latest frozen revision, choose **Create revision**. Attach a revised PDF and explicitly pair corresponding pages. Recalibrate the revised sheets, review carried measurements, edit sizes and routes, add new items and remove deleted scope.
-7. Compare paired sheets side by side or in overlay. **Align points** uses two corresponding points on each drawing. This transformation applies only to the overlay.
-8. Confirm changed items, then export a workbook or printable client report. Draft reports include outstanding checks. Final issue requires resolved quantities, rates, queries and change confirmations. **Query** pins a tender question to its drawing location.
+7. Revisions opens with changes for the selected sheet. Choose **All sheets** for the project list. Select **Review evidence** to open the correct pair and highlight the drawing item. Confirmation becomes available after its side-by-side evidence has rendered. Scope or price edits return affected reviews to pending. Compare paired sheets side by side or in overlay. **Align points** uses two corresponding points on each drawing. This transformation applies only to the overlay.
+8. Reports shows confirmed, pending and total proposed variations in PKR. Confirm changed items, then export a workbook or printable client report. Draft reports include outstanding checks. Final issue requires resolved quantities, rates, queries and change confirmations. **Query** pins a tender question to its drawing location.
 
 For a mixed-scale drawing, mark the sheet as containing multiple scales in calibration settings. Measurement is then blocked for that sheet. Export its individual drawing regions as separate PDF sheets and calibrate them independently.
 
@@ -53,6 +53,10 @@ For a mixed-scale drawing, mark the sheet as containing multiple scales in calib
 - Priced quantities retain six decimal places. Monetary amounts and scope effects round per line to two decimals. Rate effect is the line variation less its rounded scope effect so cent-level residuals reconcile.
 - For comparable lines, scope effect uses the old rate on the quantity difference. Rate effect uses the new quantity on the rate difference. New scope receives its full new amount. Removed scope receives a credit for its old amount. A commercial-unit change produces linked removal and addition lines.
 - Priced subtotals include resolved amounts. Unresolved lines display a dash and appear in the exception register. An explicitly entered zero is a valid rate.
+
+**BOQ calculation details** shows the full priced quantities, the individual rate for each item, and the rounded item amounts that make up the subtotal. The compact group quantity is rounded for display. An optional **BOQ roll-up** groups compatible items priced with different contractor codes under a single client code. Such a group displays **Mixed rates** when its item rates differ.
+
+The editor distinguishes m, m² and pc. Choose the commercial pricing unit deliberately when changing between linear and area rates. Equivalent spellings such as m2 and pcs are accepted during import. Existing incompatible mappings remain visible as **Needs remapping**. Resolve them in the inspector to issue a final priced report.
 
 ## Reports and backups
 

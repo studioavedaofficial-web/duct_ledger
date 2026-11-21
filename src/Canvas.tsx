@@ -1,27 +1,29 @@
-import { useEffect,useState,useRef } from "react";
+import { useEffect, useState, useRef } from "react";
 import {
-MousePointer2,
-Hand,
-Ruler,
-MessageSquarePlus,
-Plus,
-Minus,
-Maximize,
-RotateCw,
-Undo2,
-Redo2,
-Layers,
-ChevronDown,Focus,ChevronLeft,
-ChevronRight
+  MousePointer2,
+  Hand,
+  Ruler,
+  MessageSquarePlus,
+  Plus,
+  Minus,
+  Maximize,
+  RotateCw,
+  Undo2,
+  Redo2,
+  Layers,
+  ChevronDown,
+  Focus,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { drawPage } from "./io";
 import {
-piece,
-type Sheet,
-type Rev,
-type Item,
-type Pt,
-type Project,
+  piece,
+  type Sheet,
+  type Rev,
+  type Item,
+  type Pt,
+  type Project,
 } from "./model";
 import { IconButton } from "./ui";
 export type Tool =
@@ -30,10 +32,12 @@ export function SheetImage({
   data,
   sheet,
   onError,
+  onReady,
 }: {
   data: string;
   sheet: Sheet;
   onError?: (s: string) => void;
+  onReady?: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -41,7 +45,10 @@ export function SheetImage({
     const canvas = document.createElement("canvas");
     drawPage(canvas, data, sheet, Math.min(2.4, 2400 / sheet.w))
       .then(() => {
-        if (live) ref.current?.replaceChildren(canvas);
+        if (live) {
+          ref.current?.replaceChildren(canvas);
+          onReady?.();
+        }
       })
       .catch((e) => {
         if (live) onError?.(e.message);

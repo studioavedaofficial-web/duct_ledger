@@ -55,6 +55,8 @@ export type Item = {
   count: number;
   waste: number;
   code: string;
+  pricingUnit?: Unit;
+  groupCode?: string;
   pts: Pt[];
   review?: boolean;
   decision?: string;
@@ -91,20 +93,61 @@ export const round = (n: number, d = 2) => Number(n.toFixed(d));
 export const fmt = (n: number | null | undefined, d = 2) =>
   n == null ? "—" : n.toLocaleString("en-US", { maximumFractionDigits: d });
 export const distance = (a: Pt, b: Pt) => Math.hypot(b[0] - a[0], b[1] - a[1]);
+export function normalizeUnit(v: string): Unit | null {
+  if (typeof v !== "string") return null;
+  const text = v.trim().toLowerCase();
+  return ["m²", "m2", "sqm", "m^2"].includes(text)
+    ? "m²"
+    : ["m", "metre", "meter", "rm"].includes(text)
+      ? "m"
+      : ["pc", "pcs", "piece", "ea", "no", "nos"].includes(text)
+        ? "pc"
+        : null;
+}
+export function pricingUnit(item: Item, rev: Rev): Unit {
+  if (piece(item.kind)) return "pc";
+  const specified = normalizeUnit(item.pricingUnit ?? "");
+  if (specified === "m" || specified === "m²") return specified;
+  return normalizeUnit(
+    rev.rates.find((v) => v.code === item.code)?.unit ?? "",
+  ) === "m"
+    ? "m"
+    : "m²";
+}
+export function mappingIssue(unit: Unit, rate: Rate | undefined) {
+  if (!rate) return "BOQ mapping unresolved";
+  return normalizeUnit(rate.unit) === unit
+    ? ""
+    : "Needs remapping · item uses " +
+        unit +
+        ", " +
+        rate.code +
+        " uses " +
+        rate.unit;
+}
+export const moneyPolicy =
+  "Priced quantities use up to six decimal places. Each item amount is rounded to two decimal places before summing. Scope is rounded per change. Rate effect carries the remaining cents.";
 export function calculate(item: Item, rev: Rev) {
   const s = rev.sheets.find((x) => x.id === item.sheet),
     r = rev.rates.find((x) => x.code === item.code),
     errors: string[] = [];
   const fitting = piece(item.kind),
-    unit = r?.unit ?? (fitting ? "pc" : "m²");
+    unit = pricingUnit(item, rev);
   if (!s?.scale || s.mixed)
     errors.push(s?.mixed ? "Mixed-scale sheet blocked" : "Calibration missing");
   if (!item.spec.trim()) errors.push("Material specification missing");
   if (!item.zone.trim() || !item.system.trim())
     errors.push("System or zone missing");
-  if (!item.code || !r) errors.push("BOQ mapping unresolved");
+  const mapping = mappingIssue(unit, r);
+  if (mapping) errors.push(mapping);
+  if (item.groupCode && item.groupCode !== item.code) {
+    const groupIssue = mappingIssue(
+      unit,
+      rev.rates.find((v) => v.code === item.groupCode),
+    );
+    if (groupIssue) errors.push(groupIssue);
+  }
   if (r?.rate == null) errors.push("Rate missing");
-  if ((unit === "pc") !== fitting) errors.push("Incompatible rate unit");
   if (item.review) errors.push("Measurement requires review");
   const length =
     item.kind === "Vertical riser"
@@ -162,6 +205,9 @@ export function changes(old: Rev | undefined, next: Rev) {
     delta: number | null;
     side: "old" | "new";
     key: string;
+    sheetId: string;
+    oldSheetId?: string;
+    newSheetId?: string;
   }[] = [];
   if (!old) return result;
   for (const id of new Set([...old.items, ...next.items].map((i) => i.id))) {
@@ -194,6 +240,9 @@ export function changes(old: Rev | undefined, next: Rev) {
         rate: delta === null ? null : round(delta - scope!),
         side,
         key,
+        sheetId: (side === "old" ? a : b)!.sheet,
+        oldSheetId: x ? a?.sheet : undefined,
+        newSheetId: y ? b?.sheet : undefined,
       });
     }
     if (o && n && o.unit !== n.unit) {
@@ -209,17 +258,24 @@ export function changes(old: Rev | undefined, next: Rev) {
             a.height !== b.height ||
             a.diameter !== b.diameter
           ? "Resized"
-          : JSON.stringify(a.pts) !== JSON.stringify(b.pts)
+          : a.sheet !== b.sheet ||
+              JSON.stringify(a.pts) !== JSON.stringify(b.pts)
             ? "Rerouted"
-            : a.spec !== b.spec
+            : a.spec !== b.spec ||
+                a.kind !== b.kind ||
+                a.zone !== b.zone ||
+                a.system !== b.system
               ? "Specification changed"
-              : o?.rate !== n?.rate
-                ? "Rate changed"
-                : o?.quantity !== n?.quantity
-                  ? "Quantity changed"
-                  : b.decision && b.decision !== "Retained"
-                    ? b.decision
-                    : "Retained";
+              : (a.groupCode || a.code) !== (b.groupCode || b.code) ||
+                  a.code !== b.code
+                ? "BOQ mapping changed"
+                : o?.rate !== n?.rate
+                  ? "Rate changed"
+                  : o?.quantity !== n?.quantity
+                    ? "Quantity changed"
+                    : b.decision && b.decision !== "Retained"
+                      ? b.decision
+                      : "Retained";
     if (type !== "Retained") emit(type, o, n, b ? "new" : "old", id);
   }
   return result;
@@ -279,25 +335,128 @@ export function newProject(name: string, location: string): Project {
 export const totals = (r: Rev) =>
   round(r.items.reduce((s, i) => s + (calculate(i, r).amount ?? 0), 0));
 export function boq(r: Rev) {
-  return Array.from(new Set(r.items.map((i) => i.code))).map((code) => {
-    const rows = r.items.filter((i) => i.code === code),
-      rate = r.rates.find((x) => x.code === code),
-      c = rows.map((i) => calculate(i, r));
-    return {
-      code,
-      rows,
-      rate,
-      quantity: c.some((x) => x.quantity == null)
-        ? null
-        : round(
-            c.reduce((a, x) => a + x.quantity!, 0),
+  return Array.from(new Set(r.items.map((i) => i.groupCode || i.code))).map(
+    (code) => {
+      const rows = r.items.filter((i) => (i.groupCode || i.code) === code),
+        rate = r.rates.find((v) => v.code === code);
+      const lines = rows.map((item) => ({ item, calc: calculate(item, r) }));
+      const unit = normalizeUnit(rate?.unit ?? "");
+      const rates = new Set(lines.map((l) => l.calc.rate)),
+        excluded = lines.filter((l) => l.calc.amount === null).length;
+      const quantity = lines.every(
+        (l) =>
+          l.calc.quantity !== null &&
+          l.calc.unit === unit &&
+          !l.calc.errors.some((e) => e.startsWith("Needs remapping")),
+      )
+        ? round(
+            lines.reduce((n, l) => n + l.calc.quantity!, 0),
             6,
-          ),
-      amount: c.some((x) => x.amount == null)
-        ? null
-        : round(c.reduce((a, x) => a + x.amount!, 0)),
-    };
-  });
+          )
+        : null;
+      const amount =
+        excluded === rows.length
+          ? null
+          : round(lines.reduce((n, l) => n + (l.calc.amount ?? 0), 0));
+      return {
+        code,
+        rows,
+        lines,
+        rate,
+        unit,
+        quantity,
+        amount,
+        excluded,
+        mixedRates: rates.size > 1,
+        unitRate: rates.size === 1 ? lines[0].calc.rate : null,
+      };
+    },
+  );
+}
+export type Change = ReturnType<typeof changes>[number];
+export const confirmed = (r: Rev, c: Change) =>
+  r.approved.includes(c.key) || r.approved.includes(c.id);
+export function reviewTotals(rows: Change[], r: Rev) {
+  let accepted = 0,
+    pending = 0,
+    additions = 0,
+    credits = 0,
+    unpriced = 0;
+  for (const c of rows) {
+    if (c.delta === null) {
+      unpriced++;
+      continue;
+    }
+    if (confirmed(r, c)) accepted += c.delta;
+    else pending += c.delta;
+    if (c.delta < 0) credits += c.delta;
+    else additions += c.delta;
+  }
+  return {
+    confirmed: round(accepted),
+    pending: round(pending),
+    proposed: round(accepted + pending),
+    additions: round(additions),
+    credits: round(credits),
+    unpriced,
+  };
+}
+export function finalChecks(r: Rev, rows: Change[]) {
+  return [
+    ...exceptions(r),
+    ...rows
+      .filter((c) => !confirmed(r, c))
+      .map((c) => c.id + " · " + c.description + " awaiting confirmation"),
+    ...rows
+      .filter((c) => c.delta === null)
+      .map((c) => c.id + " · Variation has an unresolved amount"),
+  ];
+}
+export const sheetLabel = (s: Sheet | undefined) =>
+  s ? s.number + " · " + s.name.replace(/ HVAC Plan$/i, "") : "Unpaired sheet";
+export function keepValidApprovals(
+  before: Rev,
+  after: Rev,
+  old: Rev | undefined,
+) {
+  if (!before.approved.length) return [];
+  const previous = changes(old, before);
+  const evidence = (r: Rev, c: Change) => {
+    const i = r.items.find((i) => i.id === c.id),
+      s = r.sheets.find((s) => s.id === i?.sheet);
+    return JSON.stringify([
+      c,
+      i && [
+        i.sheet,
+        i.pts,
+        i.kind,
+        i.width,
+        i.height,
+        i.diameter,
+        i.rise,
+        i.count,
+        i.waste,
+        i.code,
+        i.groupCode || i.code,
+        i.spec,
+        i.system,
+        i.zone,
+        i.decision || "",
+        pricingUnit(i, r),
+      ],
+      s && [s.doc, s.page, s.scale, s.mixed ?? false],
+    ]);
+  };
+  return changes(old, after)
+    .filter((c) => {
+      const was = previous.find((v) => v.key === c.key);
+      return (
+        was &&
+        confirmed(before, was) &&
+        evidence(before, was) === evidence(after, c)
+      );
+    })
+    .map((c) => c.key);
 }
 
 export function quantityExplanation(i: Item, r: Rev) {

@@ -1,15 +1,22 @@
 import { useState } from "react";
 import type ExcelJS from "exceljs";
 import { FileUp } from "lucide-react";
-import { Field,Choice,Modal } from "./ui";
-import { piece,fmt,type Rev,type Rate,type Project } from "./model";
+import { Field, Choice, Modal } from "./ui";
 import {
-normalizeUnit,
-readRateRows,
-readClient,
-targetCells,
-populate,
-estimateBook,
+  normalizeUnit,
+  pricingUnit,
+  mappingIssue,
+  fmt,
+  type Rev,
+  type Rate,
+  type Project,
+} from "./model";
+import {
+  readRateRows,
+  readClient,
+  targetCells,
+  populate,
+  estimateBook,
 } from "./books";
 import { download } from "./io";
 export function RatesDialog({
@@ -58,11 +65,14 @@ export function RatesDialog({
         ? "Duplicate code"
         : "",
       !normalizeUnit(v.unit) ? "Unsupported unit" : "",
-      r.items.some(
-        (it) => it.code === v.code && piece(it.kind) !== (v.unit === "pc"),
-      )
-        ? "Incompatible unit"
-        : "",
+      ...r.items
+        .filter((it) => it.code === v.code || it.groupCode === v.code)
+        .map((it) => {
+          const issue = mappingIssue(pricingUnit(it, r), v);
+          return issue ? it.id + " · " + issue : "";
+        })
+        .filter(Boolean)
+        .slice(0, 1),
       v.rate == null || !Number.isFinite(v.rate) || v.rate < 0
         ? "Missing or invalid rate"
         : "",
@@ -173,7 +183,7 @@ export function RatesDialog({
                   </td>
                   <td>
                     <Choice
-                      value={v.unit}
+                      value={normalizeUnit(v.unit) ?? v.unit}
                       onChange={(e) => field(i, "unit", e.target.value)}
                     >
                       {!normalizeUnit(v.unit) && <option>{v.unit}</option>}
@@ -343,7 +353,7 @@ export function ClientDialog({
                     {s.name}!{c.address}
                   </td>
                   <td>
-                    {fmt(c.quantity)}{" "}
+                    {fmt(c.quantity, 6)}{" "}
                     {r.rates.find((t) => t.code === c.code)?.unit}
                   </td>
                   <td>{c.error || "Ready"}</td>

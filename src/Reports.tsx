@@ -1,26 +1,35 @@
-import { useState,useEffect } from "react";
+import { SheetImage } from "./Canvas";
+import { useState } from "react";
 import {
-FileSpreadsheet,
-FileText,
-Download,
-Check,
-Layers,
-ScanLine,ChevronDown,ClipboardList
+  FileSpreadsheet,
+  FileText,
+  Download,
+  Layers,
+  ScanLine,
+  ChevronDown,
+  ClipboardList,
 } from "lucide-react";
 import {
-quantityExplanation,
-calculate,
-changes,
-exceptions,
-round,
-fmt,
-boq,
-totals,
-type Project,
-type Rev,type Pt
+  sheetLabel,
+  confirmed,
+  reviewTotals,
+  finalChecks,
+  moneyPolicy,
+  type Change,
+  type Sheet,
+  type Item,
+  quantityExplanation,
+  calculate,
+  changes,
+  fmt,
+  boq,
+  totals,
+  type Project,
+  type Rev,
+  type Pt,
 } from "./model";
-import { Modal,Choice,Field,Empty } from "./ui";
-import { download,thumbnail } from "./io";
+import { Modal, Choice, Field, Empty } from "./ui";
+import { download, thumbnail } from "./io";
 import { estimateBook } from "./books";
 export function BOQ({
   r,
@@ -36,6 +45,8 @@ export function BOQ({
   initial: string;
 }) {
   const [open, setOpen] = useState(initial);
+  const groups = boq(r),
+    excluded = groups.reduce((n, g) => n + g.excluded, 0);
   return (
     <section className="data-area">
       <div className="datahead">
@@ -59,21 +70,26 @@ export function BOQ({
       </div>
       <div className="metrics">
         <Metric title="Priced subtotal" value={"PKR " + fmt(totals(r))} />
-        <Metric title="BOQ lines" value={String(boq(r).length)} />
+        <Metric title="BOQ lines" value={String(groups.length)} />
         <Metric title="Drawing items" value={String(r.items.length)} />
       </div>
+      {excluded > 0 && (
+        <p className="issue">
+          {excluded} unresolved item(s) excluded from priced subtotals.
+        </p>
+      )}
       <div className="tablewrap">
         <table>
           <thead>
             <tr>
               <th>Item code / description</th>
               <th>Items</th>
-              <th>Priced quantity</th>
+              <th>Priced quantity (rounded)</th>
               <th>Unit rate (PKR)</th>
               <th>Amount (PKR)</th>
             </tr>
           </thead>
-          {boq(r).map((b) => (
+          {groups.map((b) => (
             <tbody key={b.code}>
               <tr
                 className="clickrow"
@@ -92,25 +108,59 @@ export function BOQ({
                 </td>
                 <td>{b.rows.length}</td>
                 <td>
-                  {fmt(b.quantity)} {b.rate?.unit}
+                  {fmt(b.quantity)} {b.unit}
                 </td>
-                <td>{fmt(b.rate?.rate)}</td>
-                <td>{fmt(b.amount)}</td>
+                <td>{b.mixedRates ? "Mixed rates" : fmt(b.unitRate, 12)}</td>
+                <td>
+                  {fmt(b.amount)}
+                  {b.excluded > 0 && <small>{b.excluded} excluded</small>}
+                  <button
+                    className="textlink"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setOpen(open === b.code ? "#" : b.code);
+                    }}
+                  >
+                    Calculation details
+                  </button>
+                </td>
               </tr>
               {open === b.code &&
-                b.rows.map((i) => (
+                b.lines.map(({ item: i, calc }) => (
                   <tr className="subrow" key={i.id} onClick={() => go(i.id)}>
                     <td>
                       <button className="textlink">{i.id}</button> · {i.kind}
                     </td>
                     <td>{r.sheets.find((s) => s.id === i.sheet)?.number}</td>
                     <td>
-                      {fmt(calculate(i, r).quantity)} {b.rate?.unit}
+                      {fmt(calc.quantity, 6)} {calc.unit}
                     </td>
-                    <td>{fmt(b.rate?.rate)}</td>
-                    <td>{fmt(calculate(i, r).amount)}</td>
+                    <td>{calc.rate ?? "—"}</td>
+                    <td>
+                      {fmt(calc.amount)}
+                      {calc.errors.map((e) => (
+                        <small key={e}>{e}</small>
+                      ))}
+                    </td>
                   </tr>
                 ))}
+              {open === b.code && (
+                <tr>
+                  <td colSpan={5}>
+                    <strong>Calculation details</strong>
+                    <p>{moneyPolicy}</p>
+                    <p>
+                      Priced item amounts (PKR) ·{" "}
+                      {b.lines
+                        .filter((l) => l.calc.amount !== null)
+                        .map((l) => fmt(l.calc.amount))
+                        .join(" + ") || "—"}{" "}
+                      = {fmt(b.amount)}
+                    </p>
+                    Exact group quantity · {fmt(b.quantity, 6)} {b.unit}
+                  </td>
+                </tr>
+              )}
             </tbody>
           ))}
         </table>
@@ -135,21 +185,26 @@ export function Metric({ title, value }: { title: string; value: string }) {
 export function ReviewTable({
   r,
   old,
+  rows,
   go,
-  confirm,
+  review,
+  empty,
+  evidenceOnly,
 }: {
+  evidenceOnly: boolean;
   r: Rev;
   old?: Rev;
-  go: (id: string, old?: boolean) => void;
-  confirm: (id: string) => void;
+  rows: Change[];
+  go: (id: string, baseline?: boolean) => void;
+  review: (c: Change) => void;
+  empty: string;
 }) {
-  const rows = changes(old, r);
   return (
     <div className="tablewrap">
       <table>
         <thead>
           <tr>
-            <th>Drawing item</th>
+            <th>Drawing item / sheet</th>
             <th>Change</th>
             <th>Old quantity / rate / amount</th>
             <th>New quantity / rate / amount</th>
@@ -160,68 +215,69 @@ export function ReviewTable({
           </tr>
         </thead>
         <tbody>
-          {rows.map((c) => (
-            <tr
-              key={c.key}
-              onClick={() => go(c.id, c.side === "old")}
-              className="clickrow"
-            >
-              <td>
-                <button className="textlink">{c.id}</button>
-              </td>
-              <td>
-                {c.description}
-                {(!c.old || !c.next || c.old.unit === c.next.unit) && (
-                  <small>
-                    Δ {fmt((c.next?.quantity ?? 0) - (c.old?.quantity ?? 0))}{" "}
-                    {c.next?.unit ?? c.old?.unit}
-                  </small>
-                )}
-              </td>
-              {[c.old, c.next].map((v, n) => (
-                <td key={n}>
-                  {v ? (
-                    <>
-                      {fmt(v.quantity)} {v.unit}
-                      <small>
-                        PKR {fmt(v.rate)}/{v.unit}
-                      </small>
-                      <small>PKR {fmt(v.amount)}</small>
-                    </>
-                  ) : (
-                    "—"
-                  )}
-                </td>
-              ))}
-              <td>{fmt(c.scope)}</td>
-              <td>{fmt(c.rate)}</td>
-              <td className="money">{fmt(c.delta)}</td>
-              <td>
-                {r.approved.includes(c.id) ? (
-                  <span className="readystatus">
-                    <Check size={13} />
-                    Confirmed
-                  </span>
-                ) : (
+          {rows.map((c) => {
+            const sheet = (c.side === "old" ? old : r)?.sheets.find(
+              (s) => s.id === c.sheetId,
+            );
+            return (
+              <tr className="clickrow" key={c.key} onClick={() => review(c)}>
+                <td>
                   <button
-                    className="secondary small"
-                    disabled={r.frozen}
+                    className="textlink"
                     onClick={(e) => {
                       e.stopPropagation();
-                      confirm(c.id);
+                      if (evidenceOnly) review(c);
+                      else go(c.id, c.side === "old");
                     }}
                   >
-                    Confirm
+                    {c.id}
                   </button>
-                )}
-              </td>
-            </tr>
-          ))}
+                  <small>
+                    {c.oldSheetId &&
+                    c.newSheetId &&
+                    c.oldSheetId !== c.newSheetId
+                      ? sheetLabel(
+                          old?.sheets.find((s) => s.id === c.oldSheetId),
+                        ) + " → "
+                      : ""}
+                    {sheetLabel(sheet)}
+                  </small>
+                </td>
+                <td>
+                  {c.description}
+                  <small>
+                    Δ {fmt((c.next?.quantity ?? 0) - (c.old?.quantity ?? 0), 6)}{" "}
+                    {c.next?.unit ?? c.old?.unit}
+                  </small>
+                </td>
+                {[c.old, c.next].map((v, n) => (
+                  <td key={n}>
+                    {v ? (
+                      <>
+                        {fmt(v.quantity, 6)} {v.unit}
+                        <small>
+                          PKR {v.rate ?? "—"}/{v.unit}
+                        </small>
+                        <small>PKR {fmt(v.amount)}</small>
+                      </>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                ))}
+                <td>{fmt(c.scope)}</td>
+                <td>{fmt(c.rate)}</td>
+                <td className="money">{fmt(c.delta)}</td>
+                <td>
+                  <small>{confirmed(r, c) ? "Confirmed" : "Pending"}</small>
+                  <button className="secondary small">Review evidence</button>
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
-      {!rows.length && (
-        <p className="quiet">No changes recorded for this revision.</p>
-      )}
+      {!rows.length && <p className="quiet">{empty}</p>}
     </div>
   );
 }
@@ -234,21 +290,15 @@ function escape(v: unknown) {
       ]!,
   );
 }
-export async function printReport(
+export async function printReportHtml(
   p: Project,
   r: Rev,
   old: Rev | undefined,
   draft: boolean,
 ) {
   const rows = changes(old, r),
-    issues = [
-      ...exceptions(r),
-      ...rows
-        .filter((x) => !r.approved.includes(x.id))
-        .map((x) => x.id + " · Change awaiting confirmation"),
-    ];
-  if (!draft && issues.length)
-    throw Error("Resolve exceptions and confirm changes before issue");
+    issues = finalChecks(r, rows);
+  if (!draft && issues.length) throw Error(issues.join(" · "));
   const excerpts = await Promise.all(
     rows.map(async (c) => {
       const rr = c.side === "old" ? old! : r,
@@ -257,7 +307,13 @@ export async function printReport(
       const src = await thumbnail(p, s, i);
       return (
         "<article><h3>" +
-        escape(c.id + " · " + c.description) +
+        escape(
+          c.id +
+            " · " +
+            c.description +
+            " · " +
+            (confirmed(r, c) ? "Confirmed" : "Pending"),
+        ) +
         "</h3><p>" +
         escape(s.number + " · " + s.name + " · " + i.spec + " · " + i.zone) +
         '</p><img src="' +
@@ -269,9 +325,9 @@ export async function printReport(
               "<tr><td>" +
               escape(n ? r.id : old?.id) +
               "</td><td>" +
-              escape(v ? fmt(v.quantity) + " " + v.unit : "—") +
+              escape(v ? fmt(v.quantity, 6) + " " + v.unit : "—") +
               "</td><td>" +
-              escape(v ? "PKR " + fmt(v.rate) + "/" + v.unit : "—") +
+              escape(v ? "PKR " + (v.rate ?? "—") + "/" + v.unit : "—") +
               "</td><td>PKR " +
               fmt(v?.amount) +
               "</td></tr>",
@@ -296,7 +352,7 @@ export async function printReport(
           })
           .join("") +
         "<p>Quantity difference " +
-        fmt((c.next?.quantity ?? 0) - (c.old?.quantity ?? 0)) +
+        fmt((c.next?.quantity ?? 0) - (c.old?.quantity ?? 0), 6) +
         " " +
         escape(c.next?.unit ?? c.old?.unit) +
         "</p><p>Scope effect PKR " +
@@ -309,45 +365,62 @@ export async function printReport(
       );
     }),
   );
-  const total = round(rows.reduce((a, c) => a + (c.delta ?? 0), 0)),
-    add = rows.reduce((a, c) => a + Math.max(0, c.delta ?? 0), 0);
+  const money = reviewTotals(rows, r);
+  return (
+    "<html><head><title>" +
+    escape(p.name) +
+    " – variation report</title><style>@page{size:A4;margin:17mm}body{font:14px Arial;color:#19372e}h1{font-size:28px}article{break-inside:avoid;border-top:1px solid #aaa;padding:12px 0}img{max-width:100%;max-height:160px}table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:6px;border-bottom:1px solid #ccc}small{letter-spacing:2px}</style></head><body><small>DUCTLEDGER · " +
+    (draft ? "DRAFT" : "FINAL") +
+    "</small><h1>Variation report</h1><h2>" +
+    escape(p.name) +
+    "</h2><p>" +
+    escape(
+      [
+        p.location,
+        old ? "Revision " + old.id + " · " + old.date : "Baseline estimate",
+        "Revision " + r.id + " · " + r.date,
+      ].join(" | "),
+    ) +
+    "</p><p>Additions PKR " +
+    fmt(money.additions) +
+    " · Credits PKR " +
+    fmt(money.credits) +
+    "</p><p>Confirmed net variation · PKR " +
+    fmt(money.confirmed) +
+    "</p><p>Pending net variation · PKR " +
+    fmt(money.pending) +
+    "</p><h2>Total proposed variation · PKR " +
+    fmt(money.proposed) +
+    "</h2><p>Priced estimate subtotal · PKR " +
+    fmt(totals(r)) +
+    "</p>" +
+    "<p>" +
+    r.items.filter((i) => calculate(i, r).amount === null).length +
+    " unresolved estimate items and " +
+    money.unpriced +
+    " unpriced changes excluded.</p>" +
+    excerpts.join("") +
+    "<h3>Outstanding queries and assumptions</h3><p>" +
+    (issues.length ? issues.map(escape).join("<br>") : "All checks resolved.") +
+    "</p><p>Material waste is applied once to the material quantity. Fittings are priced per piece. " +
+    escape(moneyPolicy) +
+    "</p></body></html>"
+  );
+}
+export async function printReport(
+  p: Project,
+  r: Rev,
+  old: Rev | undefined,
+  draft: boolean,
+) {
+  const html = await printReportHtml(p, r, old, draft);
   const frame = document.createElement("iframe");
   frame.style.cssText =
     "position:fixed;width:1px;height:1px;bottom:0;left:0;border:0";
   document.body.append(frame);
   const d = frame.contentDocument!;
   d.open();
-  d.write(
-    "<html><head><title>" +
-      escape(p.name) +
-      " – variation report</title><style>@page{size:A4;margin:17mm}body{font:14px Arial;color:#19372e}h1{font-size:28px}article{break-inside:avoid;border-top:1px solid #aaa;padding:12px 0}img{max-width:100%;max-height:160px}table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:6px;border-bottom:1px solid #ccc}small{letter-spacing:2px}</style></head><body><small>DUCTLEDGER · " +
-      (draft ? "DRAFT" : "FINAL") +
-      "</small><h1>Variation report</h1><h2>" +
-      escape(p.name) +
-      "</h2><p>" +
-      escape(
-        [
-          p.location,
-          old ? "Revision " + old.id + " · " + old.date : "Baseline estimate",
-          "Revision " + r.id + " · " + r.date,
-        ].join(" | "),
-      ) +
-      "</p><p>Additions PKR " +
-      fmt(add) +
-      " · Credits PKR " +
-      fmt(total - add) +
-      "</p><h2>Net priced variation · PKR " +
-      fmt(total) +
-      "</h2><p>Priced estimate subtotal · PKR " +
-      fmt(totals(r)) +
-      "</p>" +
-      excerpts.join("") +
-      "<h3>Outstanding queries and assumptions</h3><p>" +
-      (issues.length
-        ? issues.map(escape).join("<br>")
-        : "All checks resolved.") +
-      "</p><p>Material waste is applied once to the material quantity. Fittings are priced per piece. Money is rounded per line to two decimal places.</p></body></html>",
-  );
+  d.write(html);
   d.close();
   await Promise.all([...d.images].map((img) => img.decode().catch(() => {})));
   frame.contentWindow?.focus();
@@ -372,12 +445,7 @@ export function ExportDialog({
   const [draft, setDraft] = useState(true),
     [busy, setBusy] = useState(false),
     [err, error] = useState("");
-  const problems = [
-    ...exceptions(r),
-    ...changes(old, r)
-      .filter((x) => !r.approved.includes(x.id))
-      .map((x) => x.id + " · Confirm change"),
-  ];
+  const problems = finalChecks(r, changes(old, r));
   async function run(print: boolean) {
     setBusy(true);
     try {
@@ -455,38 +523,89 @@ export function ExportDialog({
     </Modal>
   );
 }
+type EvidenceProps = {
+  p: Project;
+  r: Rev;
+  old: Rev;
+  a?: Sheet;
+  b?: Sheet;
+  change?: Change;
+  confirm: (key: string) => void;
+  saveAlign: (sheet: string, m: number[]) => void;
+};
+function Highlight({ item, color }: { item?: Item; color: string }) {
+  if (!item) return null;
+  return (
+    <g
+      aria-label={"Highlighted " + item.id}
+      data-item={item.id}
+      fill="none"
+      stroke={color}
+      strokeWidth="5"
+    >
+      <polyline points={item.pts.map((pt) => pt.join(",")).join(" ")} />
+      {item.pts.map(([x, y], i) => (
+        <circle key={i} cx={x} cy={y} r={item.pts.length === 1 ? 10 : 5} />
+      ))}
+    </g>
+  );
+}
 export function Compare({
   p,
   r,
   old,
+  a,
+  b,
+  change,
+  confirm,
   saveAlign,
-}: {
-  p: Project;
-  r: Rev;
-  old: Rev;
-  saveAlign: (sheet: string, m: number[]) => void;
-}) {
-  const [sel, ss] = useState(r.sheets[0]?.id ?? ""),
-    [overlay, ov] = useState(false),
+}: EvidenceProps) {
+  const [overlay, ov] = useState(false),
     [alpha, sa] = useState(0.55),
     [collect, setCollect] = useState<Pt[] | null>(null),
-    [imgs, setImgs] = useState<string[]>([]);
-  const b = r.sheets.find((s) => s.id === sel) ?? r.sheets[0],
-    a = old.sheets.find((s) => s.id === b?.id);
-  useEffect(() => {
-    let live = true;
-    setImgs([]);
-    if (a && b)
-      Promise.all([thumbnail(p, a), thumbnail(p, b)]).then(
-        (v) => live && setImgs(v),
-      );
-    return () => {
-      live = false;
-    };
-  }, [a?.doc, a?.page, b?.doc, b?.page]);
-  if (!b) return null;
+    [loaded, setLoaded] = useState<boolean[]>([false, false]),
+    [error, setError] = useState("");
+  const sheets = [a, b],
+    revisions = [old, r];
+  const items = [
+    change?.old
+      ? old.items.find((i) => i.id === change.id && i.sheet === a?.id)
+      : undefined,
+    change?.next
+      ? r.items.find((i) => i.id === change.id && i.sheet === b?.id)
+      : undefined,
+  ];
+  const ready =
+    !!change &&
+    !error &&
+    !overlay &&
+    !collect &&
+    sheets.every((s, n) => !s || loaded[n]) &&
+    (!change.old || !!items[0]) &&
+    (!change.next || !!items[1]);
+  function layer(n: number) {
+    const s = sheets[n];
+    if (!s) return null;
+    return (
+      <g>
+        <foreignObject width={s.w} height={s.h}>
+          <div style={{ position: "relative", width: "100%", height: "100%" }}>
+            <SheetImage
+              sheet={s}
+              data={p.documents[s.doc]}
+              onReady={() =>
+                setLoaded((prev) => prev.map((x, i) => (i === n ? true : x)))
+              }
+              onError={setError}
+            />
+          </div>
+        </foreignObject>
+        <Highlight item={items[n]} color={n ? "#167547" : "#b66826"} />
+      </g>
+    );
+  }
   function click(e: React.MouseEvent<SVGSVGElement>, i: number) {
-    if (!collect || !a || i !== (collect.length < 2 ? 0 : 1)) return;
+    if (!collect || !a || !b || i !== (collect.length < 2 ? 0 : 1)) return;
     const pt = new DOMPoint(e.clientX, e.clientY).matrixTransform(
         e.currentTarget.getScreenCTM()!.inverse(),
       ),
@@ -516,25 +635,15 @@ export function Compare({
       ov(true);
     } else setCollect(v);
   }
+
   return (
     <div className="compare">
       <div className="actionrow wrap">
-        <Choice
-          value={b.id}
-          onChange={(e) => {
-            ss(e.target.value);
-            setCollect(null);
-          }}
-        >
-          {r.sheets.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.number} · {s.name}
-            </option>
-          ))}
-        </Choice>
         <button
+          disabled={!a || !b}
           className="secondary small"
           onClick={() => {
+            setLoaded([false, false]);
             ov(!overlay);
             setCollect(null);
           }}
@@ -543,9 +652,10 @@ export function Compare({
           {overlay ? "Side by side" : "Overlay"}
         </button>
         <button
-          disabled={r.frozen || !a}
+          disabled={!a || !b || r.frozen}
           className="secondary small"
           onClick={() => {
+            if (overlay) setLoaded([false, false]);
             setCollect([]);
             ov(false);
           }}
@@ -557,6 +667,7 @@ export function Compare({
           <label>
             Opacity{" "}
             <input
+              aria-label="Overlay opacity"
               type="range"
               min="0"
               max="1"
@@ -567,51 +678,93 @@ export function Compare({
           </label>
         )}
       </div>
-      {!a ? (
-        <p>This sheet has no paired baseline.</p>
-      ) : (
-        <>
-          {collect && (
-            <p className="issue">
-              Click reference {(collect.length % 2) + 1} on Revision{" "}
-              {collect.length < 2 ? old.id : r.id}.
-            </p>
-          )}
-          <div className="comparegrid">
-            {(overlay ? [b] : [a, b]).map((s, i) => (
-              <div key={i}>
-                <b>
-                  {overlay
-                    ? "Aligned overlay"
-                    : "Revision " + (i ? r.id : old.id)}
-                </b>
-                <svg viewBox={`0 0 ${s.w} ${s.h}`} onClick={(e) => click(e, i)}>
-                  <image
-                    href={imgs[overlay ? 1 : i]}
-                    width={s.w}
-                    height={s.h}
-                  />
-                  {overlay && (
-                    <image
-                      href={imgs[0]}
-                      width={a.w}
-                      height={a.h}
-                      opacity={alpha}
-                      transform={
-                        "matrix(" +
-                        (r.alignment?.[b.id] ?? [1, 0, 0, 1, 0, 0]).join(" ") +
-                        ")"
-                      }
-                    />
-                  )}
-                  {collect?.slice(i * 2, i * 2 + 2).map(([x, y], n) => (
-                    <circle key={n} cx={x} cy={y} r="7" fill="#e89521" />
+      {collect && (
+        <p>
+          Click reference {(collect.length % 2) + 1} on Revision{" "}
+          {collect.length < 2 ? old.id : r.id}.
+        </p>
+      )}
+      <div className="comparegrid" key={overlay ? "overlay" : "pair"}>
+        {overlay && a && b ? (
+          <div>
+            <b>Aligned overlay · {sheetLabel(b)}</b>
+            <svg viewBox={`0 0 ${b.w} ${b.h}`}>
+              {layer(1)}
+              <g
+                opacity={alpha}
+                transform={
+                  "matrix(" +
+                  (r.alignment?.[b.id] ?? [1, 0, 0, 1, 0, 0]).join(" ") +
+                  ")"
+                }
+              >
+                {layer(0)}
+              </g>
+            </svg>
+          </div>
+        ) : (
+          sheets.map((s, n) => (
+            <div key={n}>
+              <b>
+                Revision {revisions[n].id}
+                {s ? " · " + sheetLabel(s) : " · No paired sheet"}
+              </b>
+              {s && (
+                <svg
+                  aria-label={
+                    "Revision " + revisions[n].id + " drawing " + s.number
+                  }
+                  viewBox={`0 0 ${s.w} ${s.h}`}
+                  onClick={(e) => click(e, n)}
+                >
+                  {layer(n)}
+                  {collect?.slice(n * 2, n * 2 + 2).map(([x, y], j) => (
+                    <circle key={j} cx={x} cy={y} r="7" fill="#e89521" />
                   ))}
                 </svg>
-              </div>
-            ))}
-          </div>
-        </>
+              )}
+              {change && (
+                <small>
+                  {items[n]
+                    ? change.id + " highlighted"
+                    : "No " +
+                      (n ? "revised" : "baseline") +
+                      " line for " +
+                      change.id}
+                </small>
+              )}
+            </div>
+          ))
+        )}
+      </div>
+      {error && <p className="issue">Drawing evidence unavailable · {error}</p>}
+      {change && (
+        <div className="actionrow">
+          <b>
+            {change.id} · {change.description}
+          </b>
+          {confirmed(r, change) ? (
+            <span className="readystatus">Confirmed</span>
+          ) : (
+            <button
+              className="primary small"
+              disabled={!ready || r.frozen || change.delta === null}
+              onClick={() => {
+                if (ready && !r.frozen && change.delta !== null)
+                  confirm(change.key);
+              }}
+            >
+              Confirm
+            </button>
+          )}
+          {(change.old === null || change.next === null) && (
+            <small>
+              {change.old
+                ? "Baseline line in Revision " + old.id
+                : "Revised line in Revision " + r.id}
+            </small>
+          )}
+        </div>
       )}
     </div>
   );
