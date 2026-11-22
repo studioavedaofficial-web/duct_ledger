@@ -3,12 +3,142 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <meta name="theme-color" content="#132824" />
-    <title>DuctLedger · Drawing takeoff</title>
+    <meta name="theme-color" content="#152f26" />
+    <meta
+      name="description"
+      content="Measure HVAC drawings, build a bill of quantities and review priced revisions with DuctLedger. Explore a working mechanical tender in your browser."
+    />
+    <title>DuctLedger | HVAC takeoff and variation pricing</title>
     <link rel="icon" href="/mark.svg" />
+    <link rel="stylesheet" href="/src/landing.css" />
+    <script>
+      if (new URLSearchParams(location.search).has("project"))
+        location.replace("/workspace/" + location.search + location.hash);
+    </script>
   </head>
-  <body style="margin: 0">
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+  <body>
+    <header>
+      <div class="wrap nav">
+        <a class="brand" href="/" aria-label="DuctLedger home"
+          ><img src="/mark.svg" alt="" />DuctLedger</a
+        >
+        <nav aria-label="Main navigation">
+          <a href="#workflow">Workflow</a><a href="#tender">Sample tender</a
+          ><a class="nav-open" href="/workspace/">Open workspace ↗</a>
+        </nav>
+      </div>
+    </header>
+    <main>
+      <section class="hero">
+        <div class="wrap hero-grid">
+          <div>
+            <p class="kicker">HVAC TAKEOFF &amp; ESTIMATING</p>
+            <h1>From duct drawings to <em>priced quantities.</em></h1>
+            <p class="intro">
+              Measure ductwork on your plans, apply contractor rates and show
+              clients exactly what changed between revisions.
+            </p>
+            <a class="primary" href="/workspace/"
+              >Open takeoff workspace <span aria-hidden="true">↗</span></a
+            >
+            <a class="secondary" href="#tender">Explore the sample ↓</a>
+          </div>
+          <figure>
+            <div class="sheet-head">
+              <span>DRAWING DETAIL</span><b>REV B</b>
+            </div>
+            <div class="drawing">
+              <img
+                src="/samples/ground-floor-detail.webp"
+                alt="Ground floor mechanical drawing showing the supply duct run and fittings at Crescent Business Centre"
+              /><span>SA-001 · Supply main</span>
+            </div>
+            <figcaption>
+              <strong>M-101 / Ground floor</strong><span>800 × 400 mm</span>
+            </figcaption>
+          </figure>
+        </div>
+      </section>
+      <section id="workflow" class="wrap workflow">
+        <p class="kicker">THE WORKFLOW</p>
+        <h2>Build an estimate from the plan.</h2>
+        <div class="steps">
+          <article>
+            <h3>Measure on the drawing</h3>
+            <p>
+              Calibrate your PDF to a known dimension. Trace duct runs and count
+              elbows, tees and diffusers.
+            </p>
+          </article>
+          <article>
+            <h3>Price the quantities</h3>
+            <p>
+              Map each item to a BOQ code and apply your rates per metre, square
+              metre or piece.
+            </p>
+          </article>
+          <article>
+            <h3>Review each variation</h3>
+            <p>
+              Compare revisions against the approved baseline. Follow a change
+              to its drawing and export the supporting breakdown.
+            </p>
+          </article>
+        </div>
+      </section>
+      <section id="tender">
+        <div class="wrap tender-grid">
+          <div>
+            <p class="kicker">SAMPLE TENDER / LAHORE</p>
+            <h2>Crescent Business Centre</h2>
+            <p>
+              On sheet M-101, ten metres of supply duct grew from 600 × 400 mm
+              to 800 × 400 mm. The revised quantity and unit rate explain the
+              difference below.
+            </p>
+            <a class="sheet-link" href="/samples/ductledger-rev-b.pdf"
+              >View Revision B drawing (PDF) ↗</a
+            >
+          </div>
+          <div class="ledger">
+            <table>
+              <caption>
+                SA-001 · Supply main
+              </caption>
+              <thead>
+                <tr>
+                  <th>Revision</th>
+                  <th>Quantity</th>
+                  <th>Rate / m²</th>
+                  <th>Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th>A</th>
+                  <td>20 m²</td>
+                  <td>2,500</td>
+                  <td>50,000</td>
+                </tr>
+                <tr>
+                  <th>B</th>
+                  <td>24 m²</td>
+                  <td>2,700</td>
+                  <td>64,800</td>
+                </tr>
+              </tbody>
+            </table>
+            <div class="total">
+              <span>Proposed variation</span><strong>+PKR 14,800</strong>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+    <footer class="wrap">
+      <a class="brand" href="/"><img src="/mark.svg" alt="" />DuctLedger</a>
+      <p>Projects are saved in your browser on this device.</p>
+      <a href="/workspace/">Open workspace ↗</a>
+    </footer>
   </body>
 </html>
