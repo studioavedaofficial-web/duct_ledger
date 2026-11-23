@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   SlidersHorizontal,
   Box,
@@ -16,6 +16,9 @@ import {
   mappingIssue,
   quantityExplanation,
   normalizeUnit,
+  presetSettings,
+  type Preset,
+  type Rate,
   type Unit,
   fmt,
   kinds,
@@ -25,18 +28,37 @@ import {
   type Kind,
 } from "./model";
 import { Field, Choice, Modal, IconButton, Empty } from "./ui";
+import { DrawingRate } from "./DrawingRate";
 export function Inspector({
   r,
   item,
   edit,
   openBoq,
+  saveRate,
+  priceRequest = 0,
 }: {
   r: Rev;
   item?: Item;
   edit: () => void;
   openBoq: () => void;
+  priceRequest?: number;
+  saveRate?: (rate: Rate, item: Item) => void;
 }) {
+  const [rateMode, setRateMode] = useState<"choose" | "add" | null>(null);
   const [detail, setDetail] = useState(false);
+  const lastRequest = useRef(priceRequest);
+  useEffect(() => {
+    if (priceRequest === lastRequest.current) return;
+    lastRequest.current = priceRequest;
+    if (item && !r.frozen) {
+      const unit = pricingUnit(item, r);
+      setRateMode(
+        r.rates.some((rate) => !mappingIssue(unit, rate) && rate.rate !== null)
+          ? "choose"
+          : "add",
+      );
+    }
+  }, [priceRequest, item, r]);
   if (!item)
     return (
       <aside className="inspector">
@@ -147,6 +169,21 @@ export function Inspector({
               {c.rate ?? "—"} <small>PKR/{c.unit}</small>
             </b>
           </div>
+          {c.labourRate > 0 && (
+            <>
+              <div className="keyrow">
+                <span>Mapped cost</span>
+                <b>PKR {fmt(c.baseAmount)}</b>
+              </div>
+              <div className="keyrow">
+                <span>Additional labour</span>
+                <b>
+                  {fmt(c.labourQuantity, 6)} {c.unit} × {fmt(c.labourRate)} =
+                  PKR {fmt(c.labourAmount)}
+                </b>
+              </div>
+            </>
+          )}
           <div className="amountbox">
             <span>Item amount</span>
             <strong>
@@ -163,6 +200,32 @@ export function Inspector({
               {e}
             </div>
           ))}
+          {!r.frozen && saveRate && (
+            <div className="formactions">
+              <button
+                className="secondary small"
+                onClick={() => setRateMode("choose")}
+              >
+                Choose existing rate
+              </button>
+              <button
+                className="secondary small"
+                onClick={() => setRateMode("add")}
+              >
+                Add rate
+              </button>
+            </div>
+          )}
+          {rateMode && saveRate && !r.frozen && (
+            <DrawingRate
+              key={item.id + rateMode}
+              item={item}
+              rev={r}
+              mode={rateMode}
+              save={saveRate}
+              close={() => setRateMode(null)}
+            />
+          )}
         </section>
         <button className="boqlink" onClick={openBoq}>
           <Table2 size={16} /> View BOQ mapping{" "}
@@ -197,11 +260,19 @@ export function ItemForm({
   submit,
   remove,
   redraw,
+  presets = [],
+  savePreset,
+  allowNext = false,
+  settingsOnly = false,
 }: {
   item: Item;
   r: Rev;
   close: () => void;
-  submit: (i: Item) => void;
+  submit: (i: Item, next?: boolean) => void;
+  presets?: Preset[];
+  savePreset?: (preset: Preset) => void;
+  allowNext?: boolean;
+  settingsOnly?: boolean;
   remove: () => void;
   redraw: () => void;
 }) {
@@ -209,6 +280,11 @@ export function ItemForm({
     ...structuredClone(item),
     pricingUnit: pricingUnit(item, r),
   });
+  const [presetName, setPresetName] = useState("");
+  const [savedName, setSavedName] = useState("");
+  const matchesFamily = (k: Kind) =>
+    piece(k) === piece(item.kind) &&
+    (k === "Vertical riser") === (item.kind === "Vertical riser");
   function f<K extends keyof Item>(k: K, v: Item[K]) {
     set({ ...x, [k]: v });
   }
@@ -256,15 +332,79 @@ export function ItemForm({
     </Field>
   );
   return (
-    <Modal title={"Edit " + x.id} close={close}>
+    <Modal
+      title={settingsOnly ? "Change run settings" : "Edit " + x.id}
+      close={close}
+    >
       <form
         onSubmit={(e) => {
           e.preventDefault();
           setAttempted(true);
           if (invalidCount || issue) return;
-          submit({ ...x, review: false });
+          const action = (e.nativeEvent as SubmitEvent)
+            .submitter as HTMLButtonElement | null;
+          submit(
+            { ...x, review: false },
+            allowNext && action?.value === "next",
+          );
         }}
       >
+        {savePreset && (
+          <details className="preset-tools">
+            <summary>Reusable presets</summary>
+            <Field label="Apply preset">
+              <Choice
+                value=""
+                onChange={(e) => {
+                  const preset = presets.find(
+                    (v) =>
+                      v.name === e.target.value &&
+                      matchesFamily(v.settings.kind),
+                  );
+                  if (preset) {
+                    set({
+                      ...x,
+                      ...presetSettings({ ...x, ...preset.settings }, r),
+                    });
+                    setPresetName(preset.name);
+                    setSavedName("");
+                  }
+                }}
+              >
+                <option value="">Select settings</option>
+                {presets
+                  .filter((v) => matchesFamily(v.settings.kind))
+                  .map((v) => (
+                    <option key={v.name}>{v.name}</option>
+                  ))}
+              </Choice>
+            </Field>
+            <Field label="Preset name">
+              <input
+                value={presetName}
+                onChange={(e) => {
+                  setPresetName(e.target.value);
+                  setSavedName("");
+                }}
+              />
+            </Field>
+            <button
+              className="secondary small"
+              type="button"
+              disabled={!presetName.trim() || !!issue || invalidCount}
+              onClick={() => {
+                const name = presetName.trim();
+                savePreset({ name, settings: presetSettings(x, r) });
+                setSavedName(name);
+              }}
+            >
+              {presets.some((v) => v.name === presetName.trim())
+                ? "Update preset"
+                : "Save preset"}
+            </button>
+            {savedName && <p role="status">Saved preset · {savedName}</p>}
+          </details>
+        )}
         <div className="fieldgrid">
           <Field label="Item type">
             <Choice
@@ -321,6 +461,37 @@ export function ItemForm({
           {x.kind === "Vertical riser" &&
             numeric("rise", "Vertical length (m)")}
           {!piece(x.kind) && numeric("waste", "Material waste (%)")}
+          <Field label="Pricing basis">
+            <Choice
+              value={x.pricingBasis ?? ""}
+              onChange={(e) =>
+                f(
+                  "pricingBasis",
+                  e.target.value === ""
+                    ? undefined
+                    : (e.target.value as Item["pricingBasis"]),
+                )
+              }
+            >
+              <option value="">Use mapped rate basis</option>
+              <option value="material">Material</option>
+              <option value="labour">Labour</option>
+            </Choice>
+          </Field>
+          <Field label={"Additional labour (PKR/" + unit + ")"}>
+            <input
+              type="number"
+              min="0"
+              step="any"
+              value={x.labourRate ?? ""}
+              onChange={(e) =>
+                f(
+                  "labourRate",
+                  e.target.value === "" ? undefined : +e.target.value,
+                )
+              }
+            />
+          </Field>
           <Field label="Pricing unit">
             <Choice
               value={unit}
@@ -397,17 +568,31 @@ export function ItemForm({
           </Field>
         </div>
         <div className="formactions">
-          <button type="button" className="danger" onClick={remove}>
-            <Trash2 size={15} />
-            Remove
-          </button>
-          <button type="button" className="secondary" onClick={redraw}>
-            <Focus size={15} />
-            Redraw
-          </button>
+          {!settingsOnly && (
+            <>
+              <button type="button" className="danger" onClick={remove}>
+                <Trash2 size={15} />
+                Remove
+              </button>
+              <button type="button" className="secondary" onClick={redraw}>
+                <Focus size={15} />
+                Redraw
+              </button>
+            </>
+          )}
           <button className="primary" disabled={!!issue}>
-            Save item
+            {settingsOnly ? "Apply settings" : "Save item"}
           </button>
+          {allowNext && !piece(x.kind) && x.kind !== "Vertical riser" && (
+            <button
+              className="secondary"
+              type="submit"
+              value="next"
+              disabled={!!issue}
+            >
+              Save &amp; measure next
+            </button>
+          )}
         </div>
       </form>
     </Modal>

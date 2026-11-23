@@ -1713,9 +1713,61 @@ td small {
   }
 }
 
-.variation-overview { margin: 1rem 0; }
-.variation-overview h3 { margin: 0; }
-.variation-overview .issue p { margin: .45rem 0 0; }
-.variation-overview .issue button { text-decoration: underline; }
-.variation-overview .metrics { margin: .65rem 0; }
-.variation-overview .metric { min-width: 0; }
+.variation-overview {
+  margin: 1rem 0;
+}
+.variation-overview h3 {
+  margin: 0;
+}
+.variation-overview .issue p {
+  margin: 0.45rem 0 0;
+}
+.variation-overview .issue button {
+  text-decoration: underline;
+}
+.variation-overview .metrics {
+  margin: 0.65rem 0;
+}
+.variation-overview .metric {
+  min-width: 0;
+}
+
+.takeoff-actions,
+.guided-steps,
+.run-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.takeoff-actions {
+  margin: 0 0 8px;
+}
+.takeoff-actions button,
+.run-bar button {
+  border: 1px solid var(--line);
+  padding: 5px 9px;
+  border-radius: 4px;
+  background: #fff;
+}
+.takeoff-actions summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.guided-steps {
+  margin: 6px 0;
+}
+.run-bar {
+  background: #eff5e8;
+  border-bottom: 1px solid var(--line);
+  padding: 6px 10px;
+  font-size: 13px;
+}
+.run-bar label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.run-bar strong {
+  font-weight: 600;
+}

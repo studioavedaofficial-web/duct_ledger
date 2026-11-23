@@ -8,6 +8,7 @@ makeSampleRates,
 } from "./sampleLayout";
 export async function sampleTender() {
   const p = newProject("Crescent Business Centre", "Lahore, Pakistan");
+  p.sample = true;
   p.revs = await Promise.all(
     (["A", "B"] as const).map(async (id) => {
       const resp = await fetch(samplePdfFiles[id]);

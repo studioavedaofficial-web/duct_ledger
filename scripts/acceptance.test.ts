@@ -424,3 +424,104 @@ test("Old-side, incompatible-unit and missing-quantity changes retain their unkn
   b.items[0].review = true;
   assert.equal(reviewTotals(changes(a, b), b, a).proposed, null);
 });
+
+test("Fifty-duct revision exports eight resized lines, complete totals and separate calibrated geometry", async () => {
+  const { estimateCsv } = await import("../src/books");
+  const { default: Papa } = await import("papaparse");
+  const p = newProject("Fifty-run tender", "Lahore");
+  const a = fixture("A");
+  const original = a.items[0];
+  a.items = Array.from({ length: 50 }, (_, index) => ({
+    ...structuredClone(original),
+    id: "SA-" + String(index + 1).padStart(3, "0"),
+    pts: [
+      [100, 30 + index * 10],
+      [340, 30 + index * 10],
+    ],
+  }));
+  a.rates[0].rate = 2700;
+  const b = structuredClone(a);
+  b.id = "B";
+  b.frozen = false;
+  b.items.slice(0, 8).forEach((i) => {
+    i.width = 800;
+  });
+  b.measurements = [
+    {
+      id: "AREA-1",
+      sheet: b.sheets[0].id,
+      kind: "Polygon",
+      points: [
+        [0, 0],
+        [200, 0],
+        [200, 160],
+        [0, 160],
+      ],
+      cutouts: [
+        [
+          [40, 40],
+          [120, 40],
+          [120, 80],
+          [40, 80],
+        ],
+      ],
+    },
+  ];
+  p.revs = [a, b];
+  assert.equal(boq(a)[0].quantity, 600);
+  assert.equal(boq(b)[0].quantity, 619.2);
+  assert.equal(totals(a), 1620000);
+  assert.equal(totals(b), 1671840);
+  const revised = changes(a, b);
+  assert.equal(revised.length, 8);
+  assert.equal(
+    revised.reduce((n, c) => n + c.delta!, 0),
+    51840,
+  );
+  assert.throws(
+    () => estimateCsv(p, b, a, false, "Estimate"),
+    /awaiting confirmation/,
+  );
+  b.approved = revised.map((c) => c.key);
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(await estimateBook(p, b, a, false));
+  assert.equal(
+    workbook.getWorksheet("Variation summary")!.getCell("B7").value,
+    51840,
+  );
+  assert.deepEqual(
+    (
+      workbook.getWorksheet("Drawing measurements")!.getRow(3)
+        .values as unknown[]
+    ).slice(4),
+    [20, 2, 18, "m²"],
+  );
+  const parsed = (table: Parameters<typeof estimateCsv>[4]) =>
+    Papa.parse<Record<string, string>>(estimateCsv(p, b, a, false, table), {
+      header: true,
+    }).data;
+  assert.deepEqual(
+    [parsed("Estimate").length, parsed("Detailed changes").length],
+    [50, 8],
+  );
+  assert.equal(
+    parsed("Estimate").reduce((sum, row) => sum + Number(row["Amount PKR"]), 0),
+    1671840,
+  );
+  assert.deepEqual(
+    parsed("Drawing measurements").map((row) => [
+      row.Issue,
+      row.Gross,
+      row.Deducted,
+      row.Net,
+      row.Unit,
+    ]),
+    [["FINAL", "20", "2", "18", "m²"]],
+  );
+  assert.equal(
+    parsed("Variation summary").find(
+      (row) => row.Metric === "Total proposed variation",
+    )?.Value,
+    "51840",
+  );
+});

@@ -1,3 +1,4 @@
+import { validMeasurement } from "./geometry";
 import { openDB } from "idb";
 import { getDocument, GlobalWorkerOptions } from "pdfjs-dist";
 import worker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
@@ -161,6 +162,41 @@ export async function validateProject(raw: unknown): Promise<Project> {
   const unique = (ids: string[]) =>
     ids.every((x) => typeof x === "string" && x.length) &&
     new Set(ids).size === ids.length;
+  const validOptionalCosts = (v: {
+    labourRate?: number;
+    pricingBasis?: string;
+  }) =>
+    (v.labourRate === undefined ||
+      (Number.isFinite(v.labourRate) && v.labourRate >= 0)) &&
+    (v.pricingBasis === undefined ||
+      ["material", "labour"].includes(v.pricingBasis));
+  if (p.presets !== undefined) {
+    if (
+      !Array.isArray(p.presets) ||
+      !p.presets.every((preset) => {
+        const v = preset?.settings;
+        return (
+          typeof preset?.name === "string" &&
+          preset.name.trim() &&
+          v &&
+          kinds.includes(v.kind) &&
+          [v.system, v.spec, v.code].every(
+            (field) => typeof field === "string",
+          ) &&
+          (v.groupCode === undefined || typeof v.groupCode === "string") &&
+          (v.pricingUnit === undefined || !!normalizeUnit(v.pricingUnit)) &&
+          Number.isFinite(v.waste) &&
+          v.waste >= 0 &&
+          validOptionalCosts(v) &&
+          [v.width, v.height, v.diameter].every(
+            (n) => n === null || (Number.isFinite(n) && n >= 0),
+          )
+        );
+      }) ||
+      !unique(p.presets.map((v) => v.name))
+    )
+      fail();
+  }
   if (!unique(p.revs.map((r) => r.id))) fail();
   for (const r of p.revs) {
     if (
@@ -197,10 +233,21 @@ export async function validateProject(raw: unknown): Promise<Project> {
       if (Math.abs(vp.width - s.w) > 0.01 || Math.abs(vp.height - s.h) > 0.01)
         fail();
     }
+    if (
+      r.measurements !== undefined &&
+      (!Array.isArray(r.measurements) ||
+        !unique(r.measurements.map((m) => m?.id)) ||
+        !r.measurements.every((m) => {
+          const sheet = r.sheets.find((s) => s.id === m?.sheet);
+          return sheet && validMeasurement(m, sheet);
+        }))
+    )
+      fail();
     for (const i of r.items) {
       if (
         !r.sheets.some((s) => s.id === i.sheet) ||
         !kinds.includes(i.kind) ||
+        !validOptionalCosts(i) ||
         (i.pricingUnit !== undefined && !normalizeUnit(i.pricingUnit)) ||
         (i.groupCode !== undefined && typeof i.groupCode !== "string") ||
         !Array.isArray(i.pts) ||

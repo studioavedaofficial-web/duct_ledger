@@ -1,0 +1,23 @@
+.gmbar {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin: 0.65rem 0;
+}
+.gmbar .field {
+  margin: 0;
+}
+.gmviewport {
+  max-height: 55vh;
+  overflow: auto;
+  background: #edf0e8;
+  border: 1px solid #bccbbd;
+}
+.gmviewport svg {
+  display: block;
+  max-width: none;
+  background: white;
+  cursor: crosshair;
+  user-select: none;
+}

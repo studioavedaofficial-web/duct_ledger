@@ -68,3 +68,15 @@ A separate React integration test created a project, imported a PDF, calibrated 
 
 The React integration tests use a DOM emulator and an in-memory IndexedDB implementation. Their PDF-rendering boundary is stubbed. The separate PDF tests use the actual PDF.js renderer and supplied files. The managed local preview relay timed out before opening its browser port. Native print-to-PDF output, an offline browser restart and opening the workbook in desktop Excel 2016 were not independently verified.
 
+
+## Takeoff upgrade
+
+The pre-upgrade Crescent tender had 24 items in each revision. Revision A was PKR 249,971.26, Revision B was PKR 264,771.26 and the pending variation was PKR 14,800. The saved project's drawing documents and revisions compared equal after reopening it in the upgraded workspace.
+
+| Browser scenario | Observed result |
+| --- | --- |
+| Ten separate 6 m runs using one set of settings | 10 items, 120 m², PKR 324,000. Maximum length deviation was 0 m. Undo, redo, cancellation and reload preserved the expected count. |
+| Resize eight of fifty ducts | 619.2 m², PKR 1,671,840 and +PKR 51,840. The approved revision retained 600 m² and PKR 1,620,000. |
+| Six diffuser symbols and two distractors | Seven candidates included all six symbols and one false positive. Following review, rescan and reload, six pieces remained. |
+| Two independently calibrated sheets | Manual placement produced 9.9712 m for a 10 m polyline and 17.7265 m² for an 18 m² net polygon on a scan. An out-of-bounds cutout was rejected. Exact-coordinate regression checks produced 18 m². |
+| Variation exports | Downloaded Excel and CSV and a reopened Chromium-rendered PDF agreed on the PKR 14,800 variation. The spreadsheet recorded PKR 10,000 scope and PKR 4,800 rate effects. |

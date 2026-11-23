@@ -1,3 +1,4 @@
+import type { GenericMeasurement } from "./geometry";
 export type Pt = [number, number];
 export type Kind =
   | "Rectangular duct"
@@ -7,7 +8,8 @@ export type Kind =
   | "Tee"
   | "Reducer"
   | "Damper"
-  | "Diffuser";
+  | "Diffuser"
+  | "Grille";
 export const kinds: Kind[] = [
   "Rectangular duct",
   "Circular duct",
@@ -17,6 +19,7 @@ export const kinds: Kind[] = [
   "Reducer",
   "Damper",
   "Diffuser",
+  "Grille",
 ];
 export const piece = (kind: Kind) => !kinds.slice(0, 3).includes(kind);
 export type Unit = "m²" | "m" | "pc";
@@ -56,11 +59,51 @@ export type Item = {
   waste: number;
   code: string;
   pricingUnit?: Unit;
+  pricingBasis?: "material" | "labour";
+  /** PKR per net unit, in addition to the mapped rate. */
+  labourRate?: number;
   groupCode?: string;
   pts: Pt[];
   review?: boolean;
   decision?: string;
 };
+export type Preset = {
+  name: string;
+  settings: Pick<
+    Item,
+    | "kind"
+    | "system"
+    | "spec"
+    | "width"
+    | "height"
+    | "diameter"
+    | "waste"
+    | "code"
+    | "pricingUnit"
+    | "groupCode"
+    | "pricingBasis"
+    | "labourRate"
+  >;
+};
+export function presetSettings(i: Item, r: Rev): Preset["settings"] {
+  return {
+    kind: i.kind,
+    system: i.system,
+    spec: i.spec,
+    width: i.width,
+    height: i.height,
+    diameter: i.diameter,
+    waste: i.waste,
+    code: i.code,
+    groupCode: i.groupCode,
+    pricingUnit: pricingUnit(i, r),
+    pricingBasis:
+      i.pricingBasis ??
+      r.rates.find((v) => v.code === i.code)?.basis ??
+      "material",
+    labourRate: i.labourRate,
+  };
+}
 export type Query = {
   id: string;
   sheet: string;
@@ -77,10 +120,13 @@ export type Rev = {
   rates: Rate[];
   queries: Query[];
   approved: string[];
+  measurements?: GenericMeasurement[];
   alignment?: Record<string, number[]>;
 };
 export type Project = {
+  sample?: boolean;
   version: 1;
+  presets?: Preset[];
   id: string;
   name: string;
   location: string;
@@ -172,23 +218,37 @@ export function calculate(item: Item, rev: Rev) {
     errors.push("Invalid piece count");
   const area = perimeter && length ? perimeter * length : null;
   const net = fitting ? item.count : unit === "m" ? length : area;
+  const basis = item.pricingBasis ?? r?.basis ?? "material";
+  const labourRate = item.labourRate ?? 0;
+  if (!Number.isFinite(labourRate) || labourRate < 0)
+    errors.push("Invalid additional labour rate");
   const quantity =
     net == null
       ? null
       : round(
-          net * (fitting || r?.basis === "labour" ? 1 : 1 + item.waste / 100),
+          net * (fitting || basis === "labour" ? 1 : 1 + item.waste / 100),
           6,
         );
+  const baseAmount =
+    quantity === null || r?.rate == null ? null : round(quantity * r.rate);
+  const labourQuantity = net === null ? null : round(net, 6);
+  const labourAmount =
+    labourQuantity === null ? null : round(labourQuantity * labourRate);
   const amount =
-    errors.length || quantity === null || r?.rate == null
+    errors.length || baseAmount === null || labourAmount === null
       ? null
-      : round(quantity * r.rate);
+      : round(baseAmount + labourAmount);
   return {
     length,
     area,
     net,
     quantity,
     amount,
+    baseAmount,
+    labourQuantity,
+    labourRate,
+    labourAmount,
+    basis,
     unit,
     rate: r?.rate ?? null,
     errors,
@@ -228,7 +288,10 @@ export function changes(old: Rev | undefined, next: Rev) {
         delta === null
           ? null
           : x && y
-            ? round((y.quantity! - x.quantity!) * x.rate!)
+            ? round(
+                (y.quantity! - x.quantity!) * x.rate! +
+                  (y.labourQuantity! - x.labourQuantity!) * x.labourRate,
+              )
             : delta;
       result.push({
         id,
@@ -269,7 +332,7 @@ export function changes(old: Rev | undefined, next: Rev) {
               : (a.groupCode || a.code) !== (b.groupCode || b.code) ||
                   a.code !== b.code
                 ? "BOQ mapping changed"
-                : o?.rate !== n?.rate
+                : o?.rate !== n?.rate || o?.labourRate !== n?.labourRate
                   ? "Rate changed"
                   : o?.quantity !== n?.quantity
                     ? "Quantity changed"
@@ -513,7 +576,6 @@ export function keepValidApprovals(
 
 export function quantityExplanation(i: Item, r: Rev) {
   const q = calculate(i, r),
-    rate = r.rates.find((v) => v.code === i.code),
     s = r.sheets.find((s) => s.id === i.sheet);
   const shape = piece(i.kind)
     ? fmt(i.count) + " counted pieces"
@@ -540,7 +602,7 @@ export function quantityExplanation(i: Item, r: Rev) {
       ? "Explicit vertical length " + fmt(i.rise) + " m"
       : "Calibrated path at " + fmt(s?.scale, 6) + " m per PDF point";
   const waste =
-    piece(i.kind) || rate?.basis === "labour"
+    piece(i.kind) || q.basis === "labour"
       ? "No waste applied"
       : fmt(i.waste) + "% material waste";
   return (
@@ -562,7 +624,19 @@ export function quantityExplanation(i: Item, r: Rev) {
     "/" +
     q.unit +
     " = PKR " +
-    fmt(q.amount) +
+    fmt(q.labourRate ? q.baseAmount : q.amount) +
+    (q.labourRate
+      ? ". Additional labour: " +
+        fmt(q.labourQuantity, 6) +
+        " " +
+        q.unit +
+        " × PKR " +
+        fmt(q.labourRate) +
+        " = PKR " +
+        fmt(q.labourAmount) +
+        ". Total PKR " +
+        fmt(q.amount)
+      : "") +
     "."
   );
 }

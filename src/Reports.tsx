@@ -34,7 +34,14 @@ import {
 } from "./model";
 import { Modal, Choice, Field, Empty } from "./ui";
 import { download, thumbnail } from "./io";
-import { estimateBook } from "./books";
+import {
+  estimateBook,
+  estimateCsv,
+  csvTables,
+  type CsvTable,
+  drawingMeasurementHeaders,
+  drawingMeasurementRows,
+} from "./books";
 export function BOQ({
   r,
   go,
@@ -419,6 +426,32 @@ export async function printReportHtml(
       );
     }),
   );
+  const measurements = drawingMeasurementRows(r);
+  const measurementHtml = measurements.length
+    ? "<h3>Drawing measurements</h3><table><thead><tr>" +
+      drawingMeasurementHeaders
+        .map((label) => "<th>" + label + "</th>")
+        .join("") +
+      "</tr></thead><tbody>" +
+      measurements
+        .map(
+          (row) =>
+            "<tr>" +
+            row
+              .map(
+                (value) =>
+                  "<td>" +
+                  escape(
+                    typeof value === "number" ? fmt(value, 6) : (value ?? "—"),
+                  ) +
+                  "</td>",
+              )
+              .join("") +
+            "</tr>",
+        )
+        .join("") +
+      "</tbody></table>"
+    : "";
   const money = reviewTotals(rows, r, old);
   const unresolvedEstimates = r.items.filter(
     (i) => calculate(i, r).amount === null,
@@ -476,6 +509,7 @@ export async function printReportHtml(
     " unresolved estimate " +
     (unresolvedEstimates === 1 ? "item" : "items") +
     ".</p>" +
+    measurementHtml +
     excerpts.join("") +
     "<h3>Outstanding queries and assumptions</h3><p>" +
     (issues.length ? issues.map(escape).join("<br>") : "All checks resolved.") +
@@ -530,11 +564,24 @@ export function ExportDialog({
     [err, error] = useState("");
   const rows = changes(old, r);
   const problems = finalChecks(r, rows);
-  async function run(print: boolean) {
+  const [csvTable, setCsvTable] = useState<CsvTable>("Estimate");
+  async function run(format: "xlsx" | "pdf" | "csv") {
     setBusy(true);
     try {
-      if (print) await printReport(p, r, old, draft);
-      else
+      if (format === "pdf") await printReport(p, r, old, draft);
+      else if (format === "csv") {
+        download(
+          estimateCsv(p, r, old, draft, csvTable),
+          "DuctLedger-Rev-" +
+            r.id +
+            "-" +
+            (draft ? "draft" : "final") +
+            "-" +
+            csvTable +
+            ".csv",
+          "text/csv;charset=utf-8",
+        );
+      } else
         download(
           (await estimateBook(p, r, old, draft)) as ArrayBuffer,
           "DuctLedger-Rev-" +
@@ -543,7 +590,11 @@ export function ExportDialog({
             (draft ? "draft" : "final") +
             ".xlsx",
         );
-      notify(print ? "Print dialog ready" : "Excel report exported");
+      notify(
+        format === "pdf"
+          ? "Print dialog ready"
+          : format.toUpperCase() + " report exported",
+      );
       close();
     } catch (e) {
       error(String(e));
@@ -579,7 +630,7 @@ export function ExportDialog({
         </div>
       )}
       <div className="exportopts">
-        <button disabled={busy} onClick={() => run(false)}>
+        <button disabled={busy} onClick={() => run("xlsx")}>
           <FileSpreadsheet />
           <div>
             <b>Excel variation workbook</b>
@@ -587,7 +638,7 @@ export function ExportDialog({
           </div>
           <Download />
         </button>
-        <button disabled={busy} onClick={() => run(true)}>
+        <button disabled={busy} onClick={() => run("pdf")}>
           <FileText />
           <div>
             <b>Printable client PDF</b>
@@ -603,6 +654,24 @@ export function ExportDialog({
           </div>
         </button>
       </div>
+      <Field label="CSV table">
+        <Choice
+          value={csvTable}
+          onChange={(e) => setCsvTable(e.target.value as CsvTable)}
+        >
+          {csvTables
+            .filter(
+              (table) =>
+                table !== "Drawing measurements" || r.measurements?.length,
+            )
+            .map((table) => (
+              <option key={table}>{table}</option>
+            ))}
+        </Choice>
+      </Field>
+      <button className="secondary" disabled={busy} onClick={() => run("csv")}>
+        <Download size={15} /> Download CSV
+      </button>
       {busy && <p>Preparing report…</p>}
       {err && <p className="issue">{err}</p>}
     </Modal>
@@ -823,6 +892,50 @@ export function Compare({
         )}
       </div>
       {error && <p className="issue">Drawing evidence unavailable · {error}</p>}
+      {change && (
+        <div className="tablewrap">
+          <table aria-label="Selected change pricing evidence">
+            <thead>
+              <tr>
+                <th>Revision</th>
+                <th>Dimensions / count</th>
+                <th>Priced quantity</th>
+                <th>Mapped unit rate</th>
+                <th>Amount (PKR)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[change.old, change.next].map((line, n) => {
+                const i = items[n];
+                if (!i || !line) return null;
+                const dimensions =
+                  line.unit === "pc"
+                    ? fmt(i.count) + " pc"
+                    : i.kind === "Circular duct"
+                      ? "Ø " + fmt(i.diameter) + " mm"
+                      : fmt(i.width) + " × " + fmt(i.height) + " mm";
+                return (
+                  <tr key={n}>
+                    <th>{revisions[n].id}</th>
+                    <td>{dimensions}</td>
+                    <td>
+                      {fmt(line.quantity, 6)} {line.unit}
+                    </td>
+                    <td>
+                      PKR {fmt(line.rate, 6)}/{line.unit}
+                    </td>
+                    <td>{fmt(line.amount)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <p>
+            Scope effect PKR {fmt(change.scope)} · Rate effect PKR{" "}
+            {fmt(change.rate)} · Net variation PKR {fmt(change.delta)}
+          </p>
+        </div>
+      )}
       {change && (
         <div className="actionrow">
           <b>

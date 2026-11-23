@@ -1,6 +1,7 @@
 import ExcelJS from "exceljs";
 import JSZip from "jszip";
 import Papa from "papaparse";
+import { measurementValues } from "./geometry";
 import {
   finalChecks,
   confirmed,
@@ -128,7 +129,45 @@ export async function populate(
   for (const x of cells) s.getCell(x.address).value = x.quantity;
   return wb.xlsx.writeBuffer();
 }
-export async function estimateBook(
+export const csvTables = [
+  "Estimate",
+  "BOQ",
+  "Variation summary",
+  "Detailed changes",
+  "Outstanding queries",
+  "Drawing measurements",
+] as const;
+export type CsvTable = (typeof csvTables)[number];
+
+export function drawingMeasurementRows(r: Rev) {
+  return (r.measurements ?? []).map((m) => {
+    const sheet = r.sheets.find((s) => s.id === m.sheet);
+    const values = measurementValues(
+      m,
+      sheet && !sheet.mixed ? sheet.scale : null,
+    );
+    return [
+      m.id,
+      sheet?.number,
+      m.kind,
+      values.gross,
+      values.deducted,
+      values.net,
+      values.unit,
+    ];
+  });
+}
+export const drawingMeasurementHeaders = [
+  "ID",
+  "Sheet",
+  "Geometry",
+  "Gross",
+  "Deducted",
+  "Net",
+  "Unit",
+];
+
+function estimateWorkbook(
   p: Project,
   r: Rev,
   old: Rev | undefined,
@@ -185,6 +224,10 @@ export async function estimateBook(
       "Exceptions",
       "Quantity calculation",
       "BOQ roll-up",
+      "Mapped amount PKR",
+      "Additional labour quantity",
+      "Additional labour rate PKR",
+      "Additional labour amount PKR",
     ],
     r.items.map((i) => {
       const c = calculate(i, r),
@@ -211,6 +254,10 @@ export async function estimateBook(
         c.errors.join(", "),
         quantityExplanation(i, r),
         i.groupCode || i.code,
+        c.baseAmount,
+        c.labourQuantity,
+        c.labourRate,
+        c.labourAmount,
       ];
     }),
   );
@@ -350,6 +397,12 @@ export async function estimateBook(
         .map((e) => ["", "", "Exception", e]),
     ],
   );
+  if (r.measurements?.length)
+    add(
+      "Drawing measurements",
+      drawingMeasurementHeaders,
+      drawingMeasurementRows(r),
+    );
   for (const [name, cols, format] of [
     ["Estimate", [13, 15], "0.######"],
     ["Estimate", [18], "#,##0.00"],
@@ -384,5 +437,37 @@ export async function estimateBook(
       link("Detailed changes", n + 3, c.id, c.side === "old" ? old!.id : r.id),
     );
   }
-  return wb.xlsx.writeBuffer();
+  return wb;
+}
+
+export async function estimateBook(
+  p: Project,
+  r: Rev,
+  old: Rev | undefined,
+  draft: boolean,
+) {
+  return estimateWorkbook(p, r, old, draft).xlsx.writeBuffer();
+}
+
+export function estimateCsv(
+  p: Project,
+  r: Rev,
+  old: Rev | undefined,
+  draft: boolean,
+  table: CsvTable,
+) {
+  const workbook = estimateWorkbook(p, r, old, draft);
+  const sheet = workbook.getWorksheet(table);
+  if (!sheet) throw Error("No records for this table.");
+  const count = sheet.getRow(2).actualCellCount;
+  const rowCells = (n: number) =>
+    Array.from({ length: count }, (_, col) => {
+      const cell = sheet.getRow(n).getCell(col + 1);
+      return typeof cell.value === "number" ? cell.value : cell.text;
+    });
+  const prefix = [p.name, r.id, r.date, draft ? "DRAFT" : "FINAL"];
+  const records = [["Project", "Revision", "Date", "Issue", ...rowCells(2)]];
+  for (let n = 3; n <= sheet.rowCount; n++)
+    records.push([...prefix, ...rowCells(n)]);
+  return Papa.unparse(records, { escapeFormulae: true });
 }

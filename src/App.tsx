@@ -1,3 +1,6 @@
+import { allocateIds, runSettings } from "./runSettings";
+import { SymbolSearch } from "./SymbolSearch";
+import { Measurements } from "./Measurements";
 import { useEffect, useRef, useState } from "react";
 import {
   Layers3,
@@ -40,6 +43,7 @@ import {
   newItem,
   changes,
   totals,
+  calculate,
   keepValidApprovals,
   reviewTotals,
   finalChecks,
@@ -126,6 +130,9 @@ export default function App() {
     [reviewKey, setReviewKey] = useState(""),
     [dialog, D] = useState(""),
     [tool, toolSet] = useState<Tool>("Select"),
+    [repeat, setRepeat] = useState<ReturnType<typeof runSettings> | null>(null),
+    [priceRequest, requestPrice] = useState(0),
+    [traceEpoch, resetTrace] = useState(0),
     [kind, K] = useState<Kind>("Rectangular duct"),
     [points, P] = useState<Pt[]>([]),
     [qId, Q] = useState(""),
@@ -210,6 +217,7 @@ export default function App() {
       : undefined;
     setI(chosen?.id ?? rr.items.find((i) => i.sheet === ss?.id)?.id ?? "");
     setView("Takeoff");
+    setRepeat(null);
     toolSet("Select");
     undoStack.current = [];
     redoStack.current = [];
@@ -222,9 +230,18 @@ export default function App() {
       try {
         const link = new URLSearchParams(location.search),
           id = link.get("project") ?? localStorage.getItem("dl-active");
-        const next = (id && (await getProject(id))) || (await sampleTender());
+        const demo = link.get("sample") === "1";
+        const next = demo
+          ? await sampleTender()
+          : (id && (await getProject(id))) || newProject("My first tender", "");
+
         if (live) {
-          activate(next, true);
+          activate(next, !demo);
+          if (demo) {
+            const url = new URL(location.href);
+            url.searchParams.delete("sample");
+            history.replaceState(null, "", url);
+          }
           if (link.has("item")) {
             const rr = next.revs.find((v) => v.id === link.get("revision")),
               i = rr?.items.find((v) => v.id === link.get("item"));
@@ -277,6 +294,7 @@ export default function App() {
   }
   function undo(redo = false) {
     if (!p || r?.frozen) return;
+    resetTrace((n) => n + 1);
     const stack = redo ? redoStack.current : undoStack.current,
       n = stack.pop();
     if (n) {
@@ -288,6 +306,7 @@ export default function App() {
   function chooseSheet(sheet: Sheet, rr = r!) {
     setS(sheet.id);
     setI(rr.items.find((i) => i.sheet === sheet.id)?.id ?? "");
+    setRepeat(null);
     toolSet("Select");
   }
   function chooseRev(rr: Rev) {
@@ -298,6 +317,7 @@ export default function App() {
     if (sh) chooseSheet(sh, rr);
     undoStack.current = [];
     redoStack.current = [];
+    setRepeat(null);
     toolSet("Select");
   }
   function go(id: string, baseline = false) {
@@ -312,6 +332,7 @@ export default function App() {
     close();
   }
   function setTool(t: Tool) {
+    setRepeat(null);
     if (r?.frozen && !["Select", "Pan"].includes(t)) {
       notify("This revision is frozen");
       return;
@@ -343,16 +364,23 @@ export default function App() {
       mutate((rr) => {
         rr.items.find((x) => x.id === item.id)!.pts = pts;
       });
+      setRepeat(null);
       toolSet("Select");
       return;
     }
     const prefix = piece(kind) ? "FT" : kind === "Vertical riser" ? "VR" : "SA";
-    let n = 1;
-    const ids = new Set(p!.revs.flatMap((rr) => rr.items.map((x) => x.id)));
-    while (ids.has(prefix + "-" + String(n).padStart(3, "0"))) n++;
-    const i = newItem(prefix + "-" + String(n).padStart(3, "0"), s, kind, pts);
+    const [id] = allocateIds(p!, 1, prefix);
+    const i = newItem(id, s, kind, pts);
+    if (repeat && tool === "Measure") {
+      Object.assign(i, repeat);
+      mutate((rr) => rr.items.push(i));
+      setI(i.id);
+      notify(i.id + " saved");
+      return;
+    }
     CI(i);
     open("item");
+    setRepeat(null);
     toolSet("Select");
   }
   async function handleImport(file: File, revision = false) {
@@ -403,6 +431,9 @@ export default function App() {
     nr.alignment = {};
     np.documents[pending.id] = pending.data;
     nr.sheets = pairSheets(pending.sheets, r, pairs);
+    nr.measurements = nr.measurements?.filter((m) =>
+      nr.sheets.some((s) => s.id === m.sheet),
+    );
     nr.items = nr.items
       .filter((i) => nr.sheets.some((s) => s.id === i.sheet))
       .map((i) => ({ ...i, review: true, decision: undefined }));
@@ -430,12 +461,16 @@ export default function App() {
         rr.approved = Array.from(new Set([...rr.approved, id]));
       }),
     query = r.queries.find((q) => q.id === qId),
-    editItem = createdItem ?? item;
+    editItem =
+      dialog === "repeat-settings" && repeat && s
+        ? { ...newItem("Next duct", s, repeat.kind, []), ...repeat }
+        : (createdItem ?? item);
   const selectView = (v: View) => {
     setReviewSheet(null);
     setReviewKey("");
     setView(v);
     W(false);
+    setRepeat(null);
     toolSet("Select");
   };
   const sheetOptions = [
@@ -522,7 +557,10 @@ export default function App() {
           <div className="headingblock">
             <h1>{viewNames[view]}</h1>
             <div className="projectline">
-              <span>{p.name}</span>
+              <span>
+                {p.name}
+                {p.sample ? " · Sample tender" : ""}
+              </span>
               <i /> <MapPin size={13} />
               {p.location || "Local project"}
             </div>
@@ -550,6 +588,67 @@ export default function App() {
             </button>
           </div>
         </div>
+        {view === "Takeoff" && (
+          <div className="takeoff-actions">
+            {!p.sample && !r.frozen && (
+              <details open={!r.items.length || undefined}>
+                <summary>Project steps</summary>
+                <div className="guided-steps">
+                  <button onClick={() => upload.current?.click()}>
+                    Upload drawing
+                  </button>
+                  <button disabled={!s} onClick={() => open("calibration")}>
+                    Calibrate
+                  </button>
+                  <button
+                    disabled={!s}
+                    onClick={() =>
+                      s?.scale ? setTool("Measure") : open("calibration")
+                    }
+                  >
+                    Measure duct
+                  </button>
+                  <button
+                    disabled={!r.items.length}
+                    onClick={() => {
+                      const target =
+                        r.items.find((i) => calculate(i, r).amount === null) ??
+                        item ??
+                        r.items[0];
+                      go(target.id);
+                      requestPrice((n) => n + 1);
+                    }}
+                  >
+                    Price item
+                  </button>
+                  <button onClick={() => open("export")}>Export</button>
+                </div>
+              </details>
+            )}
+            {s && (
+              <>
+                {!r.frozen && (
+                  <button
+                    onClick={() => {
+                      setTool("Select");
+                      open("symbols");
+                    }}
+                  >
+                    AutoCount
+                  </button>
+                )}
+                <button
+                  onClick={() => {
+                    setTool("Select");
+                    open("geometry");
+                  }}
+                >
+                  Lengths &amp; areas
+                </button>
+              </>
+            )}
+          </div>
+        )}
         {view === "Takeoff" ? (
           <div className={"workspace " + (wide ? "expanded" : "")}>
             <aside className="sheetside">
@@ -620,6 +719,12 @@ export default function App() {
                 select={setI}
                 tool={tool}
                 setTool={setTool}
+                repeat={repeat}
+                traceEpoch={traceEpoch}
+                editSettings={() => {
+                  resetTrace((n) => n + 1);
+                  open("repeat-settings");
+                }}
                 complete={done}
                 onePoint={
                   piece(tool === "Redraw" && item ? item.kind : kind) ||
@@ -660,6 +765,18 @@ export default function App() {
             <Inspector
               r={r}
               item={item}
+              priceRequest={priceRequest}
+              saveRate={(rate, updated) =>
+                mutate((rr) => {
+                  rr.rates = [
+                    ...rr.rates.filter((x) => x.code !== rate.code),
+                    rate,
+                  ];
+                  rr.items = rr.items.map((i) =>
+                    i.id === updated.id ? updated : i,
+                  );
+                })
+              }
               edit={() => open("item")}
               openBoq={() => {
                 BC(item?.code ?? "");
@@ -1023,12 +1140,82 @@ export default function App() {
           </div>
         </Modal>
       )}
-      {dialog === "item" && editItem && (
+      {dialog === "geometry" && s && (
+        <Measurements
+          p={p}
+          r={r}
+          s={s}
+          close={close}
+          save={(records) => {
+            mutate((rr) => {
+              rr.measurements = records;
+            });
+          }}
+        />
+      )}
+      {dialog === "symbols" && s && (
+        <SymbolSearch
+          p={p}
+          r={r}
+          s={s}
+          close={close}
+          accept={(kind, points, code) => {
+            const accepted: Pt[] = [];
+            const prior = r.items
+              .filter((i) => i.sheet === s.id && i.kind === kind)
+              .map((i) => i.pts[0]);
+            for (const point of points)
+              if (
+                ![...prior, ...accepted].some(
+                  (other) => distance(other, point) < 2,
+                )
+              )
+                accepted.push(point);
+            const ids = allocateIds(p, accepted.length, "FT");
+            mutate((rr) =>
+              accepted.forEach((point, n) =>
+                rr.items.push({ ...newItem(ids[n], s, kind, [point]), code }),
+              ),
+            );
+            if (ids.length) setI(ids[0]);
+            notify(accepted.length + " symbols added");
+            close();
+          }}
+        />
+      )}
+      {(dialog === "item" || dialog === "repeat-settings") && editItem && (
         <ItemForm
           item={editItem}
+          settingsOnly={dialog === "repeat-settings"}
+          presets={p.presets}
+          savePreset={(preset) =>
+            commit((_rr, np) => {
+              np.presets = [
+                ...(np.presets ?? []).filter((x) => x.name !== preset.name),
+                preset,
+              ];
+            })
+          }
+          allowNext={
+            !!createdItem &&
+            !piece(editItem.kind) &&
+            editItem.kind !== "Vertical riser"
+          }
+
           r={r}
           close={close}
-          submit={(i) => {
+          submit={(i, next) => {
+            if (dialog === "repeat-settings") {
+              setRepeat(runSettings(i));
+              K(i.kind);
+              close();
+              return;
+            }
+            if (next) {
+              setRepeat(runSettings(i));
+              K(i.kind);
+              toolSet("Measure");
+            }
             mutate((rr) => {
               const n = rr.items.findIndex((o) => o.id === i.id);
               if (n < 0) rr.items.push(i);
@@ -1245,6 +1432,7 @@ export default function App() {
                 );
               });
               close();
+              setRepeat(null);
               toolSet("Select");
               notify(
                 ver
@@ -1379,6 +1567,7 @@ export default function App() {
                   });
               });
               close();
+              setRepeat(null);
               toolSet("Select");
             }}
           >

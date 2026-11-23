@@ -1,3 +1,5 @@
+import { drawingEndpoints } from "./endpoints";
+import type { runSettings } from "./runSettings";
 import { useEffect, useState, useRef } from "react";
 import {
   MousePointer2,
@@ -79,6 +81,9 @@ type Props = {
   next: () => void;
   wide: () => void;
   finishName: string;
+  repeat: ReturnType<typeof runSettings> | null;
+  traceEpoch: number;
+  editSettings: () => void;
 };
 export function DrawingCanvas({
   p,
@@ -100,6 +105,9 @@ export function DrawingCanvas({
   next,
   wide,
   finishName,
+  repeat,
+  traceEpoch,
+  editSettings,
 }: Props) {
   const [zoom, z] = useState(1),
     [pan, setPan] = useState<Pt>([0, 0]),
@@ -109,6 +117,24 @@ export function DrawingCanvas({
     [layers, showLayers] = useState(false),
     [show, setShow] = useState(true),
     [view, setView] = useState({ w: 900, h: 540 });
+  const [snap, setSnap] = useState(false),
+    [locked, setLocked] = useState(false),
+    [vector, setVector] = useState<Pt[]>([]),
+    [marker, setMarker] = useState<Pt | null>(null);
+  const lastDown = useRef<{ x: number; y: number; time: number } | null>(null);
+  useEffect(() => {
+    let live = true;
+    setVector([]);
+    if (snap)
+      drawingEndpoints(p.documents[s.doc], s)
+        .then((v) => {
+          if (live) setVector(v);
+        })
+        .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [snap, p.documents[s.doc], s.doc, s.page]);
   const stage = useRef<HTMLDivElement>(null),
     svg = useRef<SVGSVGElement>(null),
     drag = useRef<{ x: number; y: number; p: Pt } | null>(null);
@@ -129,10 +155,12 @@ export function DrawingCanvas({
   useEffect(() => {
     setStart(null);
     setHover(null);
-  }, [tool, finishName]);
+    lastDown.current = null;
+    setMarker(null);
+  }, [tool, finishName, traceEpoch, s.id]);
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
+      if (e.key === "Escape" && !document.querySelector("dialog[open]")) {
         setStart(null);
         setTool("Select");
       }
@@ -151,12 +179,51 @@ export function DrawingCanvas({
   function pt(e: React.PointerEvent<SVGSVGElement>): Pt {
     const m = svg.current!.getScreenCTM()!,
       p = new DOMPoint(e.clientX, e.clientY).matrixTransform(m.inverse());
-    return [Math.min(s.w, Math.max(0, p.x)), Math.min(s.h, Math.max(0, p.y))];
+    let point: Pt = [
+      Math.min(s.w, Math.max(0, p.x)),
+      Math.min(s.h, Math.max(0, p.y)),
+    ];
+    if (tool !== "Measure") return point;
+    const axis =
+      start && locked
+        ? Math.abs(point[0] - start[0]) >= Math.abs(point[1] - start[1])
+          ? 1
+          : 0
+        : null;
+    if (axis !== null && start) point[axis] = start[axis];
+    let found: Pt | null = null;
+    let best = 8 / Math.max(0.01, Math.hypot(m.a, m.b));
+    if (snap) {
+      const consider = (node: Pt) => {
+        if (
+          axis !== null &&
+          start &&
+          Math.abs(node[axis] - start[axis]) > 0.001
+        )
+          return;
+        const d = Math.hypot(node[0] - point[0], node[1] - point[1]);
+        if (d < best) {
+          found = node;
+          best = d;
+        }
+      };
+      for (const node of vector) consider(node);
+      for (const it of items) for (const node of it.pts) consider(node);
+    }
+    setMarker(found);
+    return found ?? point;
   }
   function down(e: React.PointerEvent<SVGSVGElement>) {
-    if (tool === "Pan") return;
-    if (tool === "Select") return;
+    if (tool === "Pan" || tool === "Select" || e.button > 0) return;
     const point = pt(e);
+    const last = lastDown.current;
+    if (
+      last &&
+      Math.hypot(last.x - e.clientX, last.y - e.clientY) < 2 &&
+      e.timeStamp - last.time < 400
+    )
+      return;
+    lastDown.current = { x: e.clientX, y: e.clientY, time: e.timeStamp };
     if (
       tool === "Query" ||
       ((tool === "Measure" || tool === "Redraw") && onePoint)
@@ -187,6 +254,48 @@ export function DrawingCanvas({
           <Maximize />
         </IconButton>
       </div>
+      {tool === "Measure" && (
+        <div className="run-bar">
+          {repeat && (
+            <>
+              <strong>
+                {repeat.kind} ·{" "}
+                {repeat.diameter && repeat.kind === "Circular duct"
+                  ? "Ø" + repeat.diameter
+                  : repeat.width + " × " + repeat.height}{" "}
+                mm
+              </strong>
+              <span>
+                {repeat.system} · {repeat.spec} · {repeat.waste}% waste ·{" "}
+                {repeat.pricingUnit} · {repeat.code || "Unmapped"}
+              </span>
+              <button onClick={editSettings}>Change settings</button>
+            </>
+          )}
+          <label>
+            <input
+              type="checkbox"
+              checked={snap}
+              onChange={(e) => {
+                setSnap(e.target.checked);
+                setMarker(null);
+              }}
+            />
+            Snap endpoints
+          </label>
+          {!onePoint && (
+            <label>
+              <input
+                type="checkbox"
+                checked={locked}
+                onChange={(e) => setLocked(e.target.checked)}
+              />
+              H/V lock
+            </label>
+          )}
+          <button onClick={() => setTool("Select")}>Finish</button>
+        </div>
+      )}
       <div
         ref={stage}
         className={"stage tool-" + tool.toLowerCase()}
@@ -248,7 +357,9 @@ export function DrawingCanvas({
             className="measurement"
             viewBox={`0 0 ${s.w} ${s.h}`}
             onPointerDown={down}
-            onPointerMove={(e) => start && setHover(pt(e))}
+            onPointerMove={(e) =>
+              (start || (tool === "Measure" && snap)) && setHover(pt(e))
+            }
             aria-label="Drawing measurement layer"
           >
             {show &&
@@ -382,6 +493,18 @@ export function DrawingCanvas({
                     </text>
                   </g>
                 ))}
+            {snap && marker && tool === "Measure" && (
+              <circle
+                aria-label="Snapped endpoint"
+                cx={marker[0]}
+                cy={marker[1]}
+                r={6 / scale}
+                stroke="#c04b16"
+                fill="none"
+                strokeWidth={2 / scale}
+                pointerEvents="none"
+              />
+            )}
             {start && (
               <g stroke="#176a4f">
                 <circle cx={start[0]} cy={start[1]} r="5" fill="#b9dd52" />

@@ -1,6 +1,6 @@
 # DuctLedger
 
-A local-first HVAC takeoff and variation-pricing workspace for a single estimator. The first launch opens Crescent Business Centre, an original two-revision sample tender in Lahore. Revision A is approved and frozen. Revision B is editable.
+A local-first HVAC takeoff and variation-pricing workspace for a single estimator. Choose **Try a sample project** to open a fresh Crescent Business Centre tender in Lahore. **Open workspace** returns to your local projects or guides you through a new takeoff. Revision A is approved and frozen. Revision B is editable.
 
 ## Run locally
 
