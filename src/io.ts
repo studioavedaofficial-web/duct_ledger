@@ -17,9 +17,11 @@ const db = openDB("ductledger-local-v1", 1, {
     db.createObjectStore("projects", { keyPath: "id" });
   },
 });
-export async function save(p: Project) {
+export async function save(p: Project, requireExisting = false) {
   const tx = (await db).transaction("projects", "readwrite"),
     stored = (await tx.store.get(p.id)) as Project | undefined;
+  if (requireExisting && !stored)
+    throw Error("This project was deleted. Open another project to continue.");
   for (const baseline of stored?.revs.filter((v) => v.frozen) ?? []) {
     const candidate = p.revs.find((v) => v.id === baseline.id);
     if (JSON.stringify(candidate) !== JSON.stringify(baseline)) {
@@ -31,6 +33,8 @@ export async function save(p: Project) {
   await tx.store.put(p);
   await tx.done;
 }
+export const deleteProject = async (id: string) =>
+  (await db).delete("projects", id);
 export const getProject = async (id: string): Promise<Project | undefined> =>
   (await db).get("projects", id);
 export const allProjects = async (): Promise<Project[]> =>

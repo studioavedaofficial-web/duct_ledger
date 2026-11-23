@@ -29,6 +29,7 @@ import {
 import {
   allProjects,
   getProject,
+  deleteProject,
   save,
   validateProject,
   download,
@@ -180,17 +181,18 @@ export default function App() {
     V("");
     Z("");
     if (key === "projects")
-      allProjects()
+      saveQueue.current
+        .then(() => allProjects())
         .then(List)
         .catch((e) => E(String(e)));
   }
-  function persist(next: Project) {
+  function persist(next: Project, requireExisting = true) {
     const no = ++serial.current;
     Saved("Saving…");
     setP(next);
     saveQueue.current = saveQueue.current
       .then(async () => {
-        await save(next);
+        await save(next, requireExisting);
         if (no === serial.current) Saved("Saved locally");
       })
       .catch((e) => {
@@ -199,7 +201,7 @@ export default function App() {
       });
     localStorage.setItem("dl-active", next.id);
   }
-  function activate(next: Project, stored = false) {
+  function activate(next: Project, stored = false, existing = false) {
     const rr = stored
       ? (next.revs.find((x) => x.id === localStorage.getItem("dl-rev")) ??
         next.revs.at(-1)!)
@@ -221,7 +223,7 @@ export default function App() {
     toolSet("Select");
     undoStack.current = [];
     redoStack.current = [];
-    persist(next);
+    persist(next, existing);
     close();
   }
   useEffect(() => {
@@ -231,12 +233,13 @@ export default function App() {
         const link = new URLSearchParams(location.search),
           id = link.get("project") ?? localStorage.getItem("dl-active");
         const demo = link.get("sample") === "1";
+        const savedProject = !demo && id ? await getProject(id) : undefined;
         const next = demo
           ? await sampleTender()
-          : (id && (await getProject(id))) || newProject("My first tender", "");
+          : savedProject || newProject("My first tender", "");
 
         if (live) {
-          activate(next, !demo);
+          activate(next, !demo, !!savedProject);
           if (demo) {
             const url = new URL(location.href);
             url.searchParams.delete("sample");
@@ -442,7 +445,7 @@ export default function App() {
     );
     np.revs.push(nr);
     Pending(null);
-    activate(np);
+    activate(np, false, true);
     notify("Revision created · review carried measurements");
   }
   if (!p || !r)
@@ -1023,7 +1026,7 @@ export default function App() {
         <Modal title="Local projects" close={close}>
           <div className="projectlist">
             {list.map((v) => (
-              <button key={v.id} onClick={() => activate(v)}>
+              <button key={v.id} onClick={() => activate(v, false, true)}>
                 <FolderOpen />
                 <div>
                   <b>{v.name}</b>
@@ -1076,6 +1079,66 @@ export default function App() {
             >
               <FileUp />
               Restore backup
+            </button>
+          </div>
+          <hr />
+          <p>
+            Current project: <strong>{p.name}</strong>
+          </p>
+          <button className="secondary" onClick={() => open("deleteproject")}>
+            Delete current project
+          </button>
+          {err && <p className="issue">{err}</p>}
+        </Modal>
+      )}
+      {dialog === "deleteproject" && (
+        <Modal
+          title="Delete project?"
+          close={() => {
+            if (!busy) open("projects");
+          }}
+        >
+          <p>
+            Delete <strong>{p.name}</strong> and all its drawings, revisions and
+            measurements from this browser? This cannot be undone.
+          </p>
+          <div className="formactions">
+            <button
+              className="secondary"
+              disabled={busy}
+              onClick={() => open("projects")}
+            >
+              Cancel
+            </button>
+            <button
+              className="primary"
+              disabled={busy}
+              onClick={async () => {
+                B(true);
+                try {
+                  await saveQueue.current;
+                  const remaining = (await allProjects()).filter(
+                    (v) => v.id !== p.id,
+                  );
+                  await deleteProject(p.id);
+                  const url = new URL(location.href);
+                  for (const key of ["project", "revision", "item"])
+                    url.searchParams.delete(key);
+                  history.replaceState(null, "", url);
+                  activate(
+                    remaining[0] ?? newProject("My first tender", ""),
+                    false,
+                    remaining.length > 0,
+                  );
+                  notify("Project deleted");
+                } catch (e) {
+                  E(String(e));
+                } finally {
+                  B(false);
+                }
+              }}
+            >
+              Delete project
             </button>
           </div>
           {err && <p className="issue">{err}</p>}

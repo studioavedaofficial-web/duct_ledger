@@ -1,4 +1,7 @@
-import { useRef, useState } from "react";
+import { drawPage } from "./io";
+import { drawingEndpoints } from "./endpoints";
+import { bounds, corners, samePlace, type Rectangle } from "./rectangles";
+import { useEffect, useRef, useState } from "react";
 import { SheetImage } from "./Canvas";
 import { Choice, Field, Modal } from "./ui";
 import { fmt, type Project, type Pt, type Rev, type Sheet } from "./model";
@@ -16,6 +19,7 @@ type Props = {
   close: () => void;
   save: (records: GenericMeasurement[]) => void;
 };
+const svgBox = (b: Rectangle) => ({ x: b.x, y: b.y, width: b.w, height: b.h });
 const coords = (pts: Pt[]) => pts.map((p) => p.join(",")).join(" ");
 function Trace({
   kind,
@@ -73,6 +77,137 @@ export function Measurements({ p, r, s, close, save }: Props) {
   const draft = { id: "", sheet: s.id, kind, points, cutouts };
   const activePath = cutouts.length ? cutouts[cutouts.length - 1] : points;
   const metrics = measurementValues(draft, calibrated ? s.scale : null);
+  const [matching, setMatching] = useState(false);
+  const [template, setTemplate] = useState<Pt[]>([]);
+  const [matches, setMatches] = useState<
+    { rect: Rectangle; checked: boolean }[]
+  >([]);
+  const [searching, setSearching] = useState(false);
+  const job = useRef<Worker | null>(null);
+  const generation = useRef(0);
+  useEffect(
+    () => () => {
+      generation.current++;
+      job.current?.terminate();
+    },
+    [],
+  );
+  const chosen = matches.filter((m) => m.checked);
+  const polygons = selected.filter((m) => m.kind === "Polygon");
+  const existing = polygons
+    .filter((m) => m.points.length === 4)
+    .map((m) => {
+      const xs = m.points.map((p) => p[0]),
+        ys = m.points.map((p) => p[1]);
+      const box = bounds(
+        [Math.min(...xs), Math.min(...ys)],
+        [Math.max(...xs), Math.max(...ys)],
+      );
+      return corners(box).every((c) =>
+        m.points.some((p) => Math.hypot(p[0] - c[0], p[1] - c[1]) < 0.01),
+      )
+        ? box
+        : null;
+    })
+    .filter((b): b is Rectangle => b !== null);
+  function asMeasurement(rect: Rectangle): GenericMeasurement {
+    return {
+      id: "",
+      sheet: s.id,
+      kind: "Polygon",
+      points: corners(rect),
+      cutouts: [],
+    };
+  }
+  async function searchRectangles() {
+    if (template.length !== 2 || searching) return;
+    const current = ++generation.current;
+    setSearching(true);
+    setError("");
+    setNotice("");
+    setMatches([]);
+    try {
+      const canvas = document.createElement("canvas");
+      const data = p.documents[s.doc];
+      const [, anchors] = await Promise.all([
+        drawPage(canvas, data, s, Math.min(3, 2000 / Math.max(s.w, s.h))),
+        drawingEndpoints(data, s).catch(() => [] as Pt[]),
+      ]);
+      if (current !== generation.current) return;
+      const sx = canvas.width / s.w,
+        sy = canvas.height / s.h;
+      const box = bounds(template[0], template[1]);
+      const pixels = canvas
+        .getContext("2d")!
+        .getImageData(0, 0, canvas.width, canvas.height).data;
+      const worker = new Worker(
+        new URL("./rectangle.worker.ts", import.meta.url),
+        { type: "module" },
+      );
+      job.current = worker;
+      function done() {
+        worker.terminate();
+        job.current = null;
+        setSearching(false);
+      }
+      worker.onerror = () => {
+        done();
+        setError("Rectangle search failed. Select the outline again.");
+      };
+      worker.onmessage = ({
+        data,
+      }: {
+        data: { matches?: Rectangle[]; error?: string };
+      }) => {
+        done();
+        if (data.error) {
+          setError(data.error);
+          return;
+        }
+        function snap(c: Pt): Pt {
+          let best = c,
+            limit = 2.1;
+          for (const a of anchors) {
+            const d = Math.hypot((a[0] - c[0]) * sx, (a[1] - c[1]) * sy);
+            if (d < limit) {
+              best = a;
+              limit = d;
+            }
+          }
+          return best;
+        }
+        const fresh: Rectangle[] = [];
+        for (const found of data.matches ?? []) {
+          const rect = bounds(
+            snap([found.x / sx, found.y / sy]),
+            snap([(found.x + found.w) / sx, (found.y + found.h) / sy]),
+          );
+          if (![...existing, ...fresh].some((v) => samePlace(v, rect)))
+            fresh.push(rect);
+        }
+        setMatches(fresh.map((rect) => ({ rect, checked: true })));
+        setNotice(
+          fresh.length
+            ? "Click a highlighted rectangle to exclude or include it."
+            : "No new matching outlines. Saved rectangles are excluded.",
+        );
+      };
+      worker.postMessage(
+        {
+          pixels,
+          width: canvas.width,
+          height: canvas.height,
+          template: { ...box, w: box.w * sx, h: box.h * sy },
+        },
+        [pixels.buffer],
+      );
+    } catch (e) {
+      if (current === generation.current) {
+        setError(String(e));
+        setSearching(false);
+      }
+    }
+  }
   function replacePath(next: Pt[]) {
     if (cutouts.length) setCutouts([...cutouts.slice(0, -1), next]);
     else setPoints(next);
@@ -85,13 +220,38 @@ export function Measurements({ p, r, s, close, save }: Props) {
   }
   function add(e: React.PointerEvent<SVGSVGElement>) {
     if (!writable || e.button !== 0 || e.detail > 1 || !group.current) return;
-    if (kind === "Length" && points.length === 2) return;
+    if (!matching && kind === "Length" && points.length === 2) return;
     const matrix = group.current.getScreenCTM();
     if (!matrix) return;
     const at = new DOMPoint(e.clientX, e.clientY).matrixTransform(
       matrix.inverse(),
     );
     if (at.x < 0 || at.y < 0 || at.x > s.w || at.y > s.h) return;
+    if (matching) {
+      if (searching) return;
+      if (matches.length) {
+        const i = matches.findIndex(
+          ({ rect: b }) =>
+            at.x >= b.x &&
+            at.y >= b.y &&
+            at.x <= b.x + b.w &&
+            at.y <= b.y + b.h,
+        );
+        if (i >= 0)
+          setMatches(
+            matches.map((m, j) =>
+              i === j ? { ...m, checked: !m.checked } : m,
+            ),
+          );
+      } else {
+        setTemplate(
+          template.length === 1 ? [template[0], [at.x, at.y]] : [[at.x, at.y]],
+        );
+        setError("");
+        setNotice("");
+      }
+      return;
+    }
     const last = activePath.at(-1);
     if (last && Math.hypot(last[0] - at.x, last[1] - at.y) < 0.1) return;
     replacePath([...activePath, [at.x, at.y]]);
@@ -132,7 +292,7 @@ export function Measurements({ p, r, s, close, save }: Props) {
         </p>
       )}
       <div className="gmbar">
-        {writable && (
+        {writable && !matching && (
           <Field label="Geometry type">
             <Choice
               value={kind}
@@ -147,6 +307,23 @@ export function Measurements({ p, r, s, close, save }: Props) {
               <option>Polygon</option>
             </Choice>
           </Field>
+        )}
+        {writable && (
+          <button
+            className="secondary small"
+            disabled={!!points.length || searching}
+            onClick={() => {
+              setMatching(!matching);
+              setMatches([]);
+              setTemplate([]);
+              setNotice("");
+              setError("");
+            }}
+          >
+            {matching
+              ? "Back to manual measurement"
+              : "Find similar rectangles"}
+          </button>
         )}
         <button
           className="secondary small"
@@ -171,13 +348,15 @@ export function Measurements({ p, r, s, close, save }: Props) {
       </div>
       {writable && (
         <p>
-          {cutouts.length
-            ? "Click vertices of cutout " + cutouts.length + "."
-            : kind === "Polygon"
-              ? "Click vertices around the outer boundary."
-              : kind === "Polyline"
-                ? "Click each vertex of the path in order."
-                : "Click the two endpoints."}{" "}
+          {matching
+            ? "Click two opposite corners of one rectangular outline, then search this sheet."
+            : cutouts.length
+              ? "Click vertices of cutout " + cutouts.length + "."
+              : kind === "Polygon"
+                ? "Click vertices around the outer boundary."
+                : kind === "Polyline"
+                  ? "Click each vertex of the path in order."
+                  : "Click the two endpoints."}{" "}
           Scroll the zoomed drawing to pan.
         </p>
       )}
@@ -207,10 +386,117 @@ export function Measurements({ p, r, s, close, save }: Props) {
               <Trace key={m.id} {...m} />
             ))}
             <Trace {...draft} active />
+            {matching && template.length === 1 && (
+              <circle
+                cx={template[0][0]}
+                cy={template[0][1]}
+                r="3"
+                fill="#14419e"
+              />
+            )}
+            {matching && template.length === 2 && (
+              <rect
+                {...svgBox(bounds(template[0], template[1]))}
+                fill="none"
+                stroke="#14419e"
+                strokeDasharray="5 3"
+              />
+            )}
+            {matches.map(({ rect, checked }, i) => (
+              <rect
+                key={i}
+                {...svgBox(rect)}
+                fill={checked ? "#168550" : "#ad3726"}
+                fillOpacity=".24"
+                stroke={checked ? "#075b38" : "#ad3726"}
+              />
+            ))}
           </g>
         </svg>
       </div>
-      {writable && (
+      {matching && (
+        <div>
+          <p aria-live="polite">
+            {chosen.length} selected · Total area{" "}
+            {fmt(
+              chosen.reduce(
+                (n, m) =>
+                  n +
+                  (measurementValues(asMeasurement(m.rect), s.scale).net ?? 0),
+                0,
+              ),
+              4,
+            )}{" "}
+            m²
+          </p>
+          <div className="gmbar">
+            <button
+              className="secondary"
+              disabled={template.length !== 2 || searching}
+              onClick={searchRectangles}
+            >
+              {searching ? "Searching…" : "Search sheet"}
+            </button>
+            <button
+              className="secondary"
+              disabled={searching}
+              onClick={() => {
+                setTemplate([]);
+                setMatches([]);
+                setNotice("");
+                setError("");
+              }}
+            >
+              Select another rectangle
+            </button>
+            <button
+              className="primary"
+              disabled={!chosen.length || searching}
+              onClick={() => {
+                const additions = chosen
+                  .filter((m) => !existing.some((b) => samePlace(b, m.rect)))
+                  .map((m) => ({
+                    ...asMeasurement(m.rect),
+                    id: crypto.randomUUID(),
+                  }));
+                save([...records, ...additions]);
+                setNotice(additions.length + " rectangles saved.");
+                setMatches([]);
+                setTemplate([]);
+              }}
+            >
+              Save selected rectangles
+            </button>
+          </div>
+          {matches.length > 0 && (
+            <details>
+              <summary>Review rectangles ({matches.length})</summary>
+              {matches.map((m, i) => (
+                <label key={i} style={{ display: "block" }}>
+                  <input
+                    type="checkbox"
+                    checked={m.checked}
+                    onChange={() =>
+                      setMatches(
+                        matches.map((v, j) =>
+                          i === j ? { ...v, checked: !v.checked } : v,
+                        ),
+                      )
+                    }
+                  />{" "}
+                  Rectangle {i + 1} ·{" "}
+                  {fmt(
+                    measurementValues(asMeasurement(m.rect), s.scale).net,
+                    4,
+                  )}{" "}
+                  m²
+                </label>
+              ))}
+            </details>
+          )}
+        </div>
+      )}
+      {writable && !matching && (
         <>
           <p aria-live="polite">
             {metrics.net !== null
@@ -276,7 +562,20 @@ export function Measurements({ p, r, s, close, save }: Props) {
       {!!selected.length && (
         <div className="tablewrap">
           <table>
-            <caption>Saved measurements on {s.number}</caption>
+            <caption>
+              Saved measurements on {s.number}
+              {calibrated &&
+                polygons.length > 0 &&
+                " · Total polygon area " +
+                  fmt(
+                    polygons.reduce(
+                      (n, m) => n + (measurementValues(m, s.scale).net ?? 0),
+                      0,
+                    ),
+                    4,
+                  ) +
+                  " m²"}
+            </caption>
             <thead>
               <tr>
                 <th>Geometry</th>
