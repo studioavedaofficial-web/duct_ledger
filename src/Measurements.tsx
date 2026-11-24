@@ -1,3 +1,4 @@
+import { unitLabel } from "./region";
 import { drawPage } from "./io";
 import { drawingEndpoints } from "./endpoints";
 import { bounds, corners, samePlace, type Rectangle } from "./rectangles";
@@ -427,7 +428,7 @@ export function Measurements({ p, r, s, close, save }: Props) {
               ),
               4,
             )}{" "}
-            m²
+            {unitLabel("area")}
           </p>
           <div className="gmbar">
             <button
@@ -489,7 +490,7 @@ export function Measurements({ p, r, s, close, save }: Props) {
                     measurementValues(asMeasurement(m.rect), s.scale).net,
                     4,
                   )}{" "}
-                  m²
+                  {unitLabel("area")}
                 </label>
               ))}
             </details>
@@ -501,8 +502,8 @@ export function Measurements({ p, r, s, close, save }: Props) {
           <p aria-live="polite">
             {metrics.net !== null
               ? kind === "Polygon"
-                ? `Gross ${fmt(metrics.gross, 4)} m² − deducted ${fmt(metrics.deducted, 4)} m² = net ${fmt(metrics.net, 4)} m²`
-                : `${kind} · ${fmt(metrics.net, 4)} m`
+                ? `Gross ${fmt(metrics.gross, 4)} ${metrics.unit} − deducted ${fmt(metrics.deducted, 4)} ${metrics.unit} = net ${fmt(metrics.net, 4)} ${metrics.unit}`
+                : `${kind} · ${fmt(metrics.net, 4)} ${metrics.unit}`
               : activePath.length + " vertices placed"}
           </p>
           <div className="gmbar">
@@ -574,7 +575,8 @@ export function Measurements({ p, r, s, close, save }: Props) {
                     ),
                     4,
                   ) +
-                  " m²"}
+                  " " +
+                  unitLabel("area")}
             </caption>
             <thead>
               <tr>

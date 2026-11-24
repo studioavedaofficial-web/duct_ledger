@@ -1,3 +1,4 @@
+import { validSettings } from "./region";
 import { accountId } from "./account";
 import { validMeasurement } from "./geometry";
 import { openDB } from "idb";
@@ -159,6 +160,7 @@ export async function validateProject(raw: unknown): Promise<Project> {
   if (
     !p ||
     p.version !== 1 ||
+    (p.regionalSettings !== undefined && !validSettings(p.regionalSettings)) ||
     typeof p.name !== "string" ||
     !p.name.trim() ||
     typeof p.id !== "string" ||

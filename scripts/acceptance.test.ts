@@ -154,7 +154,7 @@ test("Circular duct, vertical riser, material waste, labour and fittings", () =>
   i.diameter = 500;
   i.waste = 10;
   assert.equal(calculate(i, r).net, Math.PI * 5);
-  assert.equal(calculate(i, r).quantity, 17.27876);
+  assert.equal(calculate(i, r).quantity, Math.PI * 5 + Math.PI / 2);
   i.kind = "Vertical riser";
   i.rise = 3;
   assert.equal(calculate(i, r).net, 6);
@@ -524,4 +524,69 @@ test("Fifty-duct revision exports eight resized lines, complete totals and separ
     )?.Value,
     "51840",
   );
+});
+
+import {
+  regionPreset,
+  setProjectRegion,
+  formatMoney,
+  displayQuantity,
+  canonicalQuantity,
+  regionalText,
+} from "../src/region";
+import { convertWorkingRates } from "../src/model";
+test("Region presets preserve geometry, entered rates and rounded line amounts", async () => {
+  const r = fixture("B");
+  const item = r.items[0];
+  item.width = 600;
+  item.height = 400;
+  item.waste = 0;
+  item.pts = [
+    [0, 0],
+    [20.79, 0],
+  ];
+  r.sheets.find((sh) => sh.id === item.sheet)!.scale = 1;
+  const rate = r.rates.find((row) => row.code === item.code)!;
+  for (const [region, expected] of [
+    ["UK", "£112,266.00"],
+    ["EU", "€112,266.00"],
+    ["US", "$112,266.00"],
+    ["PK", "PKR 112,266"],
+  ] as const) {
+    setProjectRegion(regionPreset(region));
+    assert.equal(formatMoney(calculate(item, r).amount), expected);
+    assert.equal(rate.rate, 2700);
+    assert.equal(
+      regionalText("Bill of quantities"),
+      region === "US" ? "Estimate" : "Bill of quantities",
+    );
+  }
+  setProjectRegion(regionPreset("US"));
+  try {
+    const before = structuredClone(r);
+    convertWorkingRates(r, "imperial");
+    assert.equal(changes(before, r).length, 0);
+    assert.equal(rate.unit, "ft²");
+    assert.equal(rate.rate, 250.8381);
+    assert.equal(calculate(item, r).quantity!.toFixed(6), "447.563588");
+    assert.equal(calculate(item, r).amount, 112266);
+    assert.ok(
+      Math.abs(canonicalQuantity(12, "size", "imperial") - 304.8) < 1e-12,
+    );
+    assert.ok(
+      Math.abs(displayQuantity(3.048, "length", "imperial") - 10) < 1e-12,
+    );
+    rate.rate = 25.07;
+    assert.equal(calculate(item, r).amount, 11220.42);
+    assert.equal(rate.rate, 25.07);
+    assert.throws(() => convertWorkingRates(fixture("A"), "imperial"));
+    const p = newProject("Regional export", "");
+    p.regionalSettings = regionPreset("US");
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await estimateBook(p, r, undefined, true));
+    assert.ok(wb.getWorksheet("Change order summary"));
+    assert.equal(wb.getWorksheet("Estimate")!.getCell("I2").value, "Length ft");
+  } finally {
+    setProjectRegion();
+  }
 });

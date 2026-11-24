@@ -1,3 +1,10 @@
+import {
+  currencySymbol,
+  shown,
+  unitLabel,
+  setProjectRegion,
+  regionalText,
+} from "./region";
 import ExcelJS from "exceljs";
 import JSZip from "jszip";
 import Papa from "papaparse";
@@ -173,6 +180,7 @@ function estimateWorkbook(
   old: Rev | undefined,
   draft: boolean,
 ) {
+  setProjectRegion(p.regionalSettings);
   const wb = new ExcelJS.Workbook(),
     issue = draft ? "DRAFT" : "FINAL",
     rows = changes(old, r);
@@ -211,23 +219,23 @@ function estimateWorkbook(
       "Zone",
       "Material",
       "BOQ code",
-      "Length m",
-      "Width mm",
-      "Height mm",
-      "Diameter mm",
+      "Length " + unitLabel("length"),
+      "Width " + unitLabel("size"),
+      "Height " + unitLabel("size"),
+      "Diameter " + unitLabel("size"),
       "Net quantity",
       "Waste %",
       "Priced quantity",
       "Unit",
-      "Rate PKR",
-      "Amount PKR",
+      `Rate ${currencySymbol()}`,
+      `Amount ${currencySymbol()}`,
       "Exceptions",
       "Quantity calculation",
       "BOQ roll-up",
-      "Mapped amount PKR",
+      `Mapped amount ${currencySymbol()}`,
       "Additional labour quantity",
-      "Additional labour rate PKR",
-      "Additional labour amount PKR",
+      `Additional labour rate ${currencySymbol()}`,
+      `Additional labour amount ${currencySymbol()}`,
     ],
     r.items.map((i) => {
       const c = calculate(i, r),
@@ -241,10 +249,10 @@ function estimateWorkbook(
         i.zone,
         i.spec,
         i.code,
-        c.length,
-        i.width,
-        i.height,
-        i.diameter,
+        shown(c.length, "length"),
+        shown(i.width, "size"),
+        shown(i.height, "size"),
+        shown(i.diameter, "size"),
         c.net,
         i.waste,
         c.quantity,
@@ -268,8 +276,8 @@ function estimateWorkbook(
       "Description",
       "Exact priced quantity",
       "Unit",
-      "Priced subtotal PKR",
-      "Unit rate PKR",
+      `Priced subtotal ${currencySymbol()}`,
+      `Unit rate ${currencySymbol()}`,
       "Excluded items",
       "Calculation policy",
     ],
@@ -285,18 +293,22 @@ function estimateWorkbook(
     ]),
   );
   const summarySheet = add(
-    "Variation summary",
+    regionalText("Variation summary"),
     ["Metric", "Value", "Unit"],
     [
-      ["Baseline priced subtotal", old ? totals(old) : 0, "PKR"],
-      ["New priced subtotal", totals(r), "PKR"],
-      ["Additions", money.additions, "PKR"],
-      ["Credits", money.credits, "PKR"],
-      ["Total proposed variation", money.proposed, "PKR"],
-      ["Confirmed priced subtotal", money.confirmed, "PKR"],
-      ["Pending priced subtotal", money.pending, "PKR"],
+      ["Baseline priced subtotal", old ? totals(old) : 0, currencySymbol()],
+      ["New priced subtotal", totals(r), currencySymbol()],
+      ["Additions", money.additions, currencySymbol()],
+      ["Credits", money.credits, currencySymbol()],
+      [
+        regionalText("Total proposed variation"),
+        money.proposed,
+        currencySymbol(),
+      ],
+      ["Confirmed priced subtotal", money.confirmed, currencySymbol()],
+      ["Pending priced subtotal", money.pending, currencySymbol()],
       ["Pricing status", money.status],
-      ["Priced changes subtotal", money.pricedSubtotal, "PKR"],
+      ["Priced changes subtotal", money.pricedSubtotal, currencySymbol()],
       ["Unresolved changed items", money.unpriced, "items"],
       ...(money.reason ? [["Pricing check", money.reason]] : []),
       ...(money.unpriced && !money.pricedCount
@@ -309,7 +321,11 @@ function estimateWorkbook(
       ],
     ],
   );
+  for (const row of [3, 4, 5, 6, 7, 8, 9, 11])
+    summarySheet.getCell(row, 2).numFmt = "#,##0.00";
   summarySheet.getCell("D3").value = variationHeadline(money);
+  for (const row of [3, 4, 5, 6, 7, 8, 9, 11])
+    summarySheet.getCell(row, 2).numFmt = "#,##0.00";
   summarySheet.getCell("D3").font = { bold: true };
   if (money.reason) summarySheet.getCell("D4").value = money.reason;
   summarySheet.getColumn(4).width = 48;
@@ -324,15 +340,15 @@ function estimateWorkbook(
       "Revised sheet",
       "Old quantity",
       "Old unit",
-      "Old rate PKR",
-      "Old amount PKR",
+      `Old rate ${currencySymbol()}`,
+      `Old amount ${currencySymbol()}`,
       "New quantity",
       "New unit",
-      "New rate PKR",
-      "New amount PKR",
-      "Scope PKR",
-      "Rate effect PKR",
-      "Net PKR",
+      `New rate ${currencySymbol()}`,
+      `New amount ${currencySymbol()}`,
+      `Scope ${currencySymbol()}`,
+      `Rate effect ${currencySymbol()}`,
+      `Net ${currencySymbol()}`,
       "Review",
       "Revision dates",
       "Quantity difference",
@@ -363,17 +379,9 @@ function estimateWorkbook(
       [old?.date, r.date].join(" / "),
       quantityDifference(x),
       x.old && old
-        ? quantityExplanation(
-            old.items.find((i) => i.id === x.id)!,
-            old,
-          )
+        ? quantityExplanation(old.items.find((i) => i.id === x.id)!, old)
         : "",
-      x.next
-        ? quantityExplanation(
-            r.items.find((i) => i.id === x.id)!,
-            r,
-          )
-        : "",
+      x.next ? quantityExplanation(r.items.find((i) => i.id === x.id)!, r) : "",
     ]),
   );
   add(
@@ -457,7 +465,7 @@ export function estimateCsv(
   table: CsvTable,
 ) {
   const workbook = estimateWorkbook(p, r, old, draft);
-  const sheet = workbook.getWorksheet(table);
+  const sheet = workbook.getWorksheet(regionalText(table));
   if (!sheet) throw Error("No records for this table.");
   const count = sheet.getRow(2).actualCellCount;
   const rowCells = (n: number) =>

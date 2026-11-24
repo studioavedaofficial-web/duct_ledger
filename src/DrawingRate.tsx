@@ -1,7 +1,7 @@
+import { currencySymbol, formatMoney } from "./region";
 import { useState } from "react";
 import {
   calculate,
-  fmt,
   mappingIssue,
   pricingUnit,
   type Item,
@@ -106,7 +106,9 @@ export function DrawingRate({
               )}
               {compatible.map((v) => (
                 <option key={v.code} value={v.code}>
-                  {v.code} · {v.description} · PKR {fmt(v.rate)}/{unit}
+                  {v.code} · {v.description}
+                  {" · "}
+                  {formatMoney(v.rate, undefined, 12)}/{unit}
                 </option>
               ))}
             </Choice>
@@ -130,7 +132,7 @@ export function DrawingRate({
             <Field label="Compatible unit">
               <input value={unit} readOnly />
             </Field>
-            <Field label="Unit price (PKR)">
+            <Field label={`Unit price (${currencySymbol()})`}>
               <input
                 required
                 type="number"
@@ -149,7 +151,11 @@ export function DrawingRate({
         )}
         {changed && (
           <div className="issue">
-            {key} · PKR {fmt(existing!.rate)} → PKR {fmt(numeric)}/{unit}.
+            {key}
+            {" · "}
+            {formatMoney(existing!.rate, undefined, 12)}
+            {" → "}
+            {formatMoney(numeric, undefined, 12)}/{unit}.
             <p>
               {affected.length
                 ? "Other affected items in this revision:"
@@ -157,17 +163,19 @@ export function DrawingRate({
             </p>
             {affected.map((i) => (
               <p key={i.id}>
-                {i.id} · {rev.sheets.find((s) => s.id === i.sheet)?.number} ·
-                PKR {fmt(calculate(i, rev).amount)} → PKR{" "}
-                {fmt(calculate(i, after).amount)}
+                {i.id} · {rev.sheets.find((s) => s.id === i.sheet)?.number}
+                {" · "}
+                {formatMoney(calculate(i, rev).amount)}
+                {" → "}
+                {formatMoney(calculate(i, after).amount)}
               </p>
             ))}
           </div>
         )}
         {valid && (
           <p>
-            Item amount after saving · PKR{" "}
-            {fmt(calculate(mapped, after).amount)}
+            {"Item amount after saving · "}
+            {formatMoney(calculate(mapped, after).amount)}
           </p>
         )}
         <div className="formactions">

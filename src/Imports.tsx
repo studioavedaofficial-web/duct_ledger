@@ -1,3 +1,4 @@
+import { currencySymbol } from "./region";
 import { useState } from "react";
 import type ExcelJS from "exceljs";
 import { FileUp } from "lucide-react";
@@ -37,7 +38,7 @@ export function RatesDialog({
     "Item code",
     "Description",
     "Unit",
-    "Rate (PKR/unit)",
+    `Rate (${currencySymbol()}/unit)`,
     "Effective date",
   ];
   const mapped =
@@ -156,7 +157,7 @@ export function RatesDialog({
                   "Code",
                   "Description",
                   "Unit",
-                  "PKR / unit",
+                  `${currencySymbol()} / unit`,
                   "Basis",
                   "Review",
                 ].map((h) => (
@@ -187,16 +188,17 @@ export function RatesDialog({
                       onChange={(e) => field(i, "unit", e.target.value)}
                     >
                       {!normalizeUnit(v.unit) && <option>{v.unit}</option>}
-                      {["m²", "m", "pc"].map((u) => (
+                      {["m²", "m", "ft²", "ft", "pc"].map((u) => (
                         <option key={u}>{u}</option>
                       ))}
                     </Choice>
                   </td>
                   <td>
                     <input
-                      aria-label="Rate in PKR"
+                      aria-label={`Rate in ${currencySymbol()}`}
                       type="number"
                       min="0"
+                      step="any"
                       value={v.rate ?? ""}
                       onChange={(e) =>
                         field(

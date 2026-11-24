@@ -1,3 +1,12 @@
+import {
+  currencySymbol,
+  formatMoney,
+  moneyNumber,
+  shown,
+  unitLabel,
+  setProjectRegion,
+  regionalText,
+} from "./region";
 import { SheetImage } from "./Canvas";
 import { useState } from "react";
 import {
@@ -63,7 +72,7 @@ export function BOQ({
       <div className="datahead">
         <div>
           <span className="eyebrow">ESTIMATE</span>
-          <h2>Bill of quantities</h2>
+          <h2>{regionalText("Bill of quantities")}</h2>
         </div>
         <div className="actionrow">
           <button
@@ -80,7 +89,7 @@ export function BOQ({
         </div>
       </div>
       <div className="metrics">
-        <Metric title="Priced subtotal" value={"PKR " + fmt(totals(r))} />
+        <Metric title="Priced subtotal" value={formatMoney(totals(r))} />
         <Metric title="BOQ lines" value={String(groups.length)} />
         <Metric title="Drawing items" value={String(r.items.length)} />
       </div>
@@ -96,8 +105,8 @@ export function BOQ({
               <th>Item code / description</th>
               <th>Items</th>
               <th>Priced quantity (rounded)</th>
-              <th>Unit rate (PKR)</th>
-              <th>Amount (PKR)</th>
+              <th>{`Unit rate (${currencySymbol()})`}</th>
+              <th>{`Amount (${currencySymbol()})`}</th>
             </tr>
           </thead>
           {groups.map((b) => (
@@ -121,9 +130,13 @@ export function BOQ({
                 <td>
                   {fmt(b.quantity)} {b.unit}
                 </td>
-                <td>{b.mixedRates ? "Mixed rates" : fmt(b.unitRate, 12)}</td>
                 <td>
-                  {fmt(b.amount)}
+                  {b.mixedRates
+                    ? "Mixed rates"
+                    : moneyNumber(b.unitRate, undefined, 12)}
+                </td>
+                <td>
+                  {moneyNumber(b.amount)}
                   {b.excluded > 0 && <small>{b.excluded} excluded</small>}
                   <button
                     className="textlink"
@@ -146,9 +159,9 @@ export function BOQ({
                     <td>
                       {fmt(calc.quantity, 6)} {calc.unit}
                     </td>
-                    <td>{calc.rate ?? "—"}</td>
+                    <td>{moneyNumber(calc.rate, undefined, 12)}</td>
                     <td>
-                      {fmt(calc.amount)}
+                      {moneyNumber(calc.amount)}
                       {calc.errors.map((e) => (
                         <small key={e}>{e}</small>
                       ))}
@@ -161,12 +174,12 @@ export function BOQ({
                     <strong>Calculation details</strong>
                     <p>{moneyPolicy}</p>
                     <p>
-                      Priced item amounts (PKR) ·{" "}
+                      {`Priced item amounts (${currencySymbol()}) ·`}{" "}
                       {b.lines
                         .filter((l) => l.calc.amount !== null)
-                        .map((l) => fmt(l.calc.amount))
+                        .map((l) => moneyNumber(l.calc.amount))
                         .join(" + ") || "—"}{" "}
-                      = {fmt(b.amount)}
+                      = {moneyNumber(b.amount)}
                     </p>
                     Exact group quantity · {fmt(b.quantity, 6)} {b.unit}
                   </td>
@@ -193,7 +206,10 @@ export function VariationOverview({
   go: (id: string, baseline?: boolean) => void;
 }) {
   return (
-    <section className="variation-overview" aria-label="Variation summary">
+    <section
+      className="variation-overview"
+      aria-label={regionalText("Variation summary")}
+    >
       <div className={money.unpriced ? "issue" : "variation-total"}>
         <h3>{variationHeadline(money)}</h3>
         {money.reason && <p>{money.reason}</p>}
@@ -221,16 +237,18 @@ export function VariationOverview({
         />
         <Metric
           title="Confirmed priced subtotal"
-          value={"PKR " + fmt(money.confirmed)}
+          value={formatMoney(money.confirmed)}
         />
         <Metric
           title="Pending priced subtotal"
-          value={"PKR " + fmt(money.pending)}
+          value={formatMoney(money.pending)}
         />
       </div>
       <p className="quiet">
-        Priced additions · PKR {fmt(money.additions)}　 Credits · PKR{" "}
-        {fmt(money.credits)}
+        {"Priced additions · "}
+        {formatMoney(money.additions)}
+        {"　 Credits · "}
+        {formatMoney(money.credits)}
       </p>
     </section>
   );
@@ -269,9 +287,9 @@ export function ReviewTable({
             <th>Change</th>
             <th>Old quantity / rate / amount</th>
             <th>New quantity / rate / amount</th>
-            <th>Scope (PKR)</th>
-            <th>Rate effect (PKR)</th>
-            <th>Variation (PKR)</th>
+            <th>{`Scope (${currencySymbol()})`}</th>
+            <th>{`Rate effect (${currencySymbol()})`}</th>
+            <th>{regionalText(`Variation (${currencySymbol()})`)}</th>
             <th>Review</th>
           </tr>
         </thead>
@@ -317,18 +335,18 @@ export function ReviewTable({
                       <>
                         {fmt(v.quantity, 6)} {v.unit}
                         <small>
-                          PKR {v.rate ?? "—"}/{v.unit}
+                          {formatMoney(v.rate, undefined, 12)}/{v.unit}
                         </small>
-                        <small>PKR {fmt(v.amount)}</small>
+                        <small>{formatMoney(v.amount)}</small>
                       </>
                     ) : (
                       "—"
                     )}
                   </td>
                 ))}
-                <td>{fmt(c.scope)}</td>
-                <td>{fmt(c.rate)}</td>
-                <td className="money">{fmt(c.delta)}</td>
+                <td>{formatMoney(c.scope)}</td>
+                <td>{formatMoney(c.rate)}</td>
+                <td className="money">{formatMoney(c.delta)}</td>
                 <td>
                   <small>{confirmed(r, c) ? "Confirmed" : "Pending"}</small>
                   <button className="secondary small">Review evidence</button>
@@ -357,6 +375,7 @@ export async function printReportHtml(
   old: Rev | undefined,
   draft: boolean,
 ) {
+  setProjectRegion(p.regionalSettings);
   const rows = changes(old, r),
     issues = finalChecks(r, rows);
   if (!draft && issues.length) throw Error(issues.join(" · "));
@@ -388,9 +407,11 @@ export async function printReportHtml(
               "</td><td>" +
               escape(v ? fmt(v.quantity, 6) + " " + v.unit : "—") +
               "</td><td>" +
-              escape(v ? "PKR " + (v.rate ?? "—") + "/" + v.unit : "—") +
-              "</td><td>PKR " +
-              fmt(v?.amount) +
+              escape(
+                v ? formatMoney(v.rate, undefined, 12) + "/" + v.unit : "—",
+              ) +
+              "</td><td>" +
+              formatMoney(v?.amount) +
               "</td></tr>",
           )
           .join("") +
@@ -416,12 +437,12 @@ export async function printReportHtml(
         fmt(quantityDifference(c), 6) +
         " " +
         escape(c.next?.unit ?? c.old?.unit) +
-        "</p><p>Scope effect PKR " +
-        fmt(c.scope) +
-        " · Rate effect PKR " +
-        fmt(c.rate) +
-        " · Net PKR " +
-        fmt(c.delta) +
+        "</p><p>Scope effect " +
+        formatMoney(c.scope) +
+        " · Rate effect " +
+        formatMoney(c.rate) +
+        " · Net " +
+        formatMoney(c.delta) +
         "</p></article>"
       );
     }),
@@ -459,9 +480,11 @@ export async function printReportHtml(
   return (
     "<html><head><title>" +
     escape(p.name) +
-    " – variation report</title><style>@page{size:A4;margin:17mm}body{font:14px Arial;color:#19372e}h1{font-size:28px}article{break-inside:avoid;border-top:1px solid #aaa;padding:12px 0}img{max-width:100%;max-height:160px}table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:6px;border-bottom:1px solid #ccc}small{letter-spacing:2px}</style></head><body><small>DUCTLEDGER · " +
+    regionalText(
+      " – variation report</title><style>@page{size:A4;margin:17mm}body{font:14px Arial;color:#19372e}h1{font-size:28px}article{break-inside:avoid;border-top:1px solid #aaa;padding:12px 0}img{max-width:100%;max-height:160px}table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:6px;border-bottom:1px solid #ccc}small{letter-spacing:2px}</style></head><body><small>DUCTLEDGER · ",
+    ) +
     (draft ? "DRAFT" : "FINAL") +
-    "</small><h1>Variation report</h1><h2>" +
+    regionalText("</small><h1>Variation report</h1><h2>") +
     escape(p.name) +
     "</h2><p>" +
     escape(
@@ -494,16 +517,16 @@ export async function printReportHtml(
     money.status +
     "</p><p>Priced changes subtotal: " +
     pricedSubtotalText(money) +
-    "</p><p>Confirmed priced subtotal · PKR " +
-    fmt(money.confirmed) +
-    "</p><p>Pending priced subtotal · PKR " +
-    fmt(money.pending) +
-    "</p><p>Priced additions PKR " +
-    fmt(money.additions) +
-    " · Credits PKR " +
-    fmt(money.credits) +
-    "</p><p>Priced estimate subtotal · PKR " +
-    fmt(totals(r)) +
+    "</p><p>Confirmed priced subtotal · " +
+    formatMoney(money.confirmed) +
+    "</p><p>Pending priced subtotal · " +
+    formatMoney(money.pending) +
+    "</p><p>Priced additions " +
+    formatMoney(money.additions) +
+    " · Credits " +
+    formatMoney(money.credits) +
+    "</p><p>Priced estimate subtotal · " +
+    formatMoney(totals(r)) +
     "</p><p>" +
     unresolvedEstimates +
     " unresolved estimate " +
@@ -633,7 +656,7 @@ export function ExportDialog({
         <button disabled={busy} onClick={() => run("xlsx")}>
           <FileSpreadsheet />
           <div>
-            <b>Excel variation workbook</b>
+            <b>{regionalText("Excel variation workbook")}</b>
             <small>Estimate, BOQ, detailed changes and queries</small>
           </div>
           <Download />
@@ -665,7 +688,9 @@ export function ExportDialog({
                 table !== "Drawing measurements" || r.measurements?.length,
             )
             .map((table) => (
-              <option key={table}>{table}</option>
+              <option key={table} value={table}>
+                {regionalText(table)}
+              </option>
             ))}
         </Choice>
       </Field>
@@ -901,7 +926,7 @@ export function Compare({
                 <th>Dimensions / count</th>
                 <th>Priced quantity</th>
                 <th>Mapped unit rate</th>
-                <th>Amount (PKR)</th>
+                <th>{`Amount (${currencySymbol()})`}</th>
               </tr>
             </thead>
             <tbody>
@@ -912,8 +937,15 @@ export function Compare({
                   line.unit === "pc"
                     ? fmt(i.count) + " pc"
                     : i.kind === "Circular duct"
-                      ? "Ø " + fmt(i.diameter) + " mm"
-                      : fmt(i.width) + " × " + fmt(i.height) + " mm";
+                      ? "Ø " +
+                        fmt(shown(i.diameter, "size")) +
+                        " " +
+                        unitLabel("size")
+                      : fmt(shown(i.width, "size")) +
+                        " × " +
+                        fmt(shown(i.height, "size")) +
+                        " " +
+                        unitLabel("size");
                 return (
                   <tr key={n}>
                     <th>{revisions[n].id}</th>
@@ -922,17 +954,21 @@ export function Compare({
                       {fmt(line.quantity, 6)} {line.unit}
                     </td>
                     <td>
-                      PKR {fmt(line.rate, 6)}/{line.unit}
+                      {formatMoney(line.rate, undefined, 6)}/{line.unit}
                     </td>
-                    <td>{fmt(line.amount)}</td>
+                    <td>{formatMoney(line.amount)}</td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
           <p>
-            Scope effect PKR {fmt(change.scope)} · Rate effect PKR{" "}
-            {fmt(change.rate)} · Net variation PKR {fmt(change.delta)}
+            {"Scope effect "}
+            {formatMoney(change.scope)}
+            {" · Rate effect "}
+            {formatMoney(change.rate)}
+            {regionalText(" · Net variation ")}
+            {formatMoney(change.delta)}
           </p>
         </div>
       )}

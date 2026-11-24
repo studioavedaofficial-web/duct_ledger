@@ -1,3 +1,13 @@
+import {
+  fmt as dimensionText,
+  piece,
+  type Sheet,
+  type Rev,
+  type Item,
+  type Pt,
+  type Project,
+} from "./model";
+import { shown, unitLabel } from "./region";
 import { drawingEndpoints } from "./endpoints";
 import type { runSettings } from "./runSettings";
 import { useEffect, useState, useRef } from "react";
@@ -19,17 +29,15 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { drawPage } from "./io";
-import {
-  piece,
-  type Sheet,
-  type Rev,
-  type Item,
-  type Pt,
-  type Project,
-} from "./model";
 import { IconButton } from "./ui";
 export type Tool =
-  "Select" | "Pan" | "Measure" | "Calibrate" | "Verify" | "Query" | "Redraw";
+  | "Select"
+  | "Pan"
+  | "Measure"
+  | "Calibrate"
+  | "Verify"
+  | "Query"
+  | "Redraw";
 export function SheetImage({
   data,
   sheet,
@@ -261,9 +269,11 @@ export function DrawingCanvas({
               <strong>
                 {repeat.kind} ·{" "}
                 {repeat.diameter && repeat.kind === "Circular duct"
-                  ? "Ø" + repeat.diameter
-                  : repeat.width + " × " + repeat.height}{" "}
-                mm
+                  ? "Ø" + dimensionText(shown(repeat.diameter, "size"))
+                  : dimensionText(shown(repeat.width, "size")) +
+                    " × " +
+                    dimensionText(shown(repeat.height, "size"))}{" "}
+                {unitLabel("size")}
               </strong>
               <span>
                 {repeat.system} · {repeat.spec} · {repeat.waste}% waste ·{" "}

@@ -551,7 +551,7 @@ test("Mixed BOQ rates and partial priced subtotal are visible on screen", async 
     within(row).getByRole("button", { name: "Calculation details" }),
   );
   expect(screen.getByRole("row", { name: /RA-002/ }).textContent).toContain(
-    "2600",
+    "2,600",
   );
   expect(screen.getByRole("row", { name: /RA-102/ }).textContent).toContain(
     "Measurement requires review",

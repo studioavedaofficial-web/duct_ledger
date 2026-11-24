@@ -1,3 +1,14 @@
+import {
+  formatMoney,
+  regionalText,
+  accountRegion,
+  currentRegion,
+  displayQuantity,
+  shown,
+  unitLabel,
+  rateConversion,
+  type RegionalSettings,
+} from "./region";
 import type { GenericMeasurement } from "./geometry";
 export type Pt = [number, number];
 export type Kind =
@@ -22,7 +33,7 @@ export const kinds: Kind[] = [
   "Grille",
 ];
 export const piece = (kind: Kind) => !kinds.slice(0, 3).includes(kind);
-export type Unit = "m²" | "m" | "pc";
+export type Unit = "ft²" | "ft" | "m²" | "m" | "pc";
 export type Rate = {
   code: string;
   description: string;
@@ -60,7 +71,7 @@ export type Item = {
   code: string;
   pricingUnit?: Unit;
   pricingBasis?: "material" | "labour";
-  /** PKR per net unit, in addition to the mapped rate. */
+  /** Project currency per net unit, in addition to the mapped rate. */
   labourRate?: number;
   groupCode?: string;
   pts: Pt[];
@@ -124,6 +135,7 @@ export type Rev = {
   alignment?: Record<string, number[]>;
 };
 export type Project = {
+  regionalSettings?: RegionalSettings;
   sample?: boolean;
   version: 1;
   presets?: Preset[];
@@ -135,13 +147,19 @@ export type Project = {
 };
 export const today = () => new Date().toISOString().slice(0, 10);
 export const uid = () => crypto.randomUUID();
-export const round = (n: number, d = 2) => Number(n.toFixed(d));
+const lineRounding = new Intl.NumberFormat("en-US", {
+  useGrouping: false,
+  maximumFractionDigits: 2,
+});
+export const round = (n: number) => Number(lineRounding.format(n));
 export const fmt = (n: number | null | undefined, d = 2) =>
   n == null ? "—" : n.toLocaleString("en-US", { maximumFractionDigits: d });
 export const distance = (a: Pt, b: Pt) => Math.hypot(b[0] - a[0], b[1] - a[1]);
 export function normalizeUnit(v: string): Unit | null {
   if (typeof v !== "string") return null;
   const text = v.trim().toLowerCase();
+  if (["ft2", "ft²", "sqft", "ft^2"].includes(text)) return "ft²";
+  if (["ft", "feet", "foot"].includes(text)) return "ft";
   return ["m²", "m2", "sqm", "m^2"].includes(text)
     ? "m²"
     : ["m", "metre", "meter", "rm"].includes(text)
@@ -153,12 +171,11 @@ export function normalizeUnit(v: string): Unit | null {
 export function pricingUnit(item: Item, rev: Rev): Unit {
   if (piece(item.kind)) return "pc";
   const specified = normalizeUnit(item.pricingUnit ?? "");
-  if (specified === "m" || specified === "m²") return specified;
-  return normalizeUnit(
+  if (specified && specified !== "pc") return specified;
+  const mapped = normalizeUnit(
     rev.rates.find((v) => v.code === item.code)?.unit ?? "",
-  ) === "m"
-    ? "m"
-    : "m²";
+  );
+  return mapped && mapped !== "pc" ? mapped : "m²";
 }
 export function mappingIssue(unit: Unit, rate: Rate | undefined) {
   if (!rate) return "BOQ mapping unresolved";
@@ -172,7 +189,7 @@ export function mappingIssue(unit: Unit, rate: Rate | undefined) {
         rate.unit;
 }
 export const moneyPolicy =
-  "Priced quantities use up to six decimal places. Each item amount is rounded to two decimal places before summing. Scope is rounded per change. Rate effect carries the remaining cents.";
+  "Pricing uses unrounded quantities and rates. Each item amount is rounded to two decimal places before summing. Scope is rounded per change. Rate effect carries the remaining cents.";
 export function calculate(item: Item, rev: Rev) {
   const s = rev.sheets.find((x) => x.id === item.sheet),
     r = rev.rates.find((x) => x.code === item.code),
@@ -217,7 +234,17 @@ export function calculate(item: Item, rev: Rev) {
   if (fitting && (!Number.isInteger(item.count) || item.count <= 0))
     errors.push("Invalid piece count");
   const area = perimeter && length ? perimeter * length : null;
-  const net = fitting ? item.count : unit === "m" ? length : area;
+  const linear = unit === "ft" || unit === "m";
+  const raw = linear ? length : area;
+  const net = fitting
+    ? item.count
+    : raw === null
+      ? null
+      : displayQuantity(
+          raw,
+          linear ? "length" : "area",
+          unit.startsWith("ft") ? "imperial" : "metric",
+        );
   const basis = item.pricingBasis ?? r?.basis ?? "material";
   const labourRate = item.labourRate ?? 0;
   if (!Number.isFinite(labourRate) || labourRate < 0)
@@ -225,19 +252,16 @@ export function calculate(item: Item, rev: Rev) {
   const quantity =
     net == null
       ? null
-      : round(
-          net * (fitting || basis === "labour" ? 1 : 1 + item.waste / 100),
-          6,
-        );
+      : net + (fitting || basis === "labour" ? 0 : (net * item.waste) / 100);
   const baseAmount =
     quantity === null || r?.rate == null ? null : round(quantity * r.rate);
-  const labourQuantity = net === null ? null : round(net, 6);
+  const labourQuantity = net;
   const labourAmount =
     labourQuantity === null ? null : round(labourQuantity * labourRate);
   const amount =
     errors.length || baseAmount === null || labourAmount === null
       ? null
-      : round(baseAmount + labourAmount);
+      : round(quantity! * r!.rate! + labourQuantity! * labourRate);
   return {
     length,
     area,
@@ -247,12 +271,34 @@ export function calculate(item: Item, rev: Rev) {
     baseAmount,
     labourQuantity,
     labourRate,
-    labourAmount,
+    labourAmount:
+      amount != null && baseAmount != null
+        ? round(amount - baseAmount)
+        : labourAmount,
     basis,
     unit,
     rate: r?.rate ?? null,
     errors,
   };
+}
+// Money per target unit = money per source unit × factor.
+function equivalentUnitFactor(source: Unit, target: Unit) {
+  if (source === target) return 1;
+  const conversion = rateConversion(
+    source,
+    target.startsWith("ft") ? "imperial" : "metric",
+  );
+  return conversion?.unit === target ? conversion.factor : null;
+}
+function sameMeasure(
+  a: number | null | undefined,
+  b: number | null | undefined,
+) {
+  if (a == null || b == null) return a === b;
+  return (
+    Math.abs(a - b) <=
+    Math.max(1, Math.abs(a), Math.abs(b)) * Number.EPSILON * 8
+  );
 }
 export function changes(old: Rev | undefined, next: Rev) {
   const result: {
@@ -275,6 +321,11 @@ export function changes(old: Rev | undefined, next: Rev) {
       b = next.items.find((i) => i.id === id),
       o = a ? calculate(a, old) : null,
       n = b ? calculate(b, next) : null;
+    const factor = o && n ? equivalentUnitFactor(o.unit, n.unit) : 1;
+    const oldRate = o?.rate == null ? o?.rate : o.rate * (factor ?? 1);
+    const oldLabour = o && o.labourRate * (factor ?? 1);
+    const oldQuantity =
+      o?.quantity == null ? o?.quantity : o.quantity / (factor ?? 1);
     function emit(
       description: string,
       x: typeof o,
@@ -289,8 +340,9 @@ export function changes(old: Rev | undefined, next: Rev) {
           ? null
           : x && y
             ? round(
-                (y.quantity! - x.quantity!) * x.rate! +
-                  (y.labourQuantity! - x.labourQuantity!) * x.labourRate,
+                (y.quantity! - oldQuantity!) * oldRate! +
+                  (y.labourQuantity! - x.labourQuantity! / factor!) *
+                    oldLabour!,
               )
             : delta;
       result.push({
@@ -308,7 +360,7 @@ export function changes(old: Rev | undefined, next: Rev) {
         newSheetId: y ? b?.sheet : undefined,
       });
     }
-    if (o && n && o.unit !== n.unit) {
+    if (o && n && factor === null) {
       emit("Unit change · removal", o, null, "old", id + "-remove");
       emit("Unit change · addition", null, n, "new", id + "-add");
       continue;
@@ -332,9 +384,10 @@ export function changes(old: Rev | undefined, next: Rev) {
               : (a.groupCode || a.code) !== (b.groupCode || b.code) ||
                   a.code !== b.code
                 ? "BOQ mapping changed"
-                : o?.rate !== n?.rate || o?.labourRate !== n?.labourRate
+                : !sameMeasure(oldRate, n?.rate) ||
+                    !sameMeasure(oldLabour, n?.labourRate)
                   ? "Rate changed"
-                  : o?.quantity !== n?.quantity
+                  : !sameMeasure(oldQuantity, n?.quantity)
                     ? "Quantity changed"
                     : (o?.amount === null) !== (n?.amount === null)
                       ? "Pricing checks changed"
@@ -364,6 +417,9 @@ export function newItem(id: string, sheet: Sheet, kind: Kind, pts: Pt[]): Item {
     sheet: sheet.id,
     kind,
     pts,
+    ...(currentRegion.units === "imperial" && !piece(kind)
+      ? { pricingUnit: "ft²" as Unit }
+      : {}),
     system: "Supply air",
     zone: sheet.name,
     spec: "Galvanized steel",
@@ -378,6 +434,7 @@ export function newItem(id: string, sheet: Sheet, kind: Kind, pts: Pt[]): Item {
 }
 export function newProject(name: string, location: string): Project {
   return {
+    regionalSettings: { ...accountRegion },
     version: 1,
     id: uid(),
     name,
@@ -414,10 +471,7 @@ export function boq(r: Rev) {
           l.calc.unit === unit &&
           !l.calc.errors.some((e) => e.startsWith("Needs remapping")),
       )
-        ? round(
-            lines.reduce((n, l) => n + l.calc.quantity!, 0),
-            6,
-          )
+        ? lines.reduce((n, l) => n + l.calc.quantity!, 0)
         : null;
       const amount =
         excluded === rows.length
@@ -441,7 +495,9 @@ export function boq(r: Rev) {
 export type Change = ReturnType<typeof changes>[number];
 export function quantityDifference(c: Change) {
   if (c.old?.quantity === null || c.next?.quantity === null) return null;
-  return (c.next?.quantity ?? 0) - (c.old?.quantity ?? 0);
+  const factor =
+    c.old && c.next ? equivalentUnitFactor(c.old.unit, c.next.unit) : 1;
+  return (c.next?.quantity ?? 0) - (c.old?.quantity ?? 0) / (factor ?? 1);
 }
 export const confirmed = (r: Rev, c: Change) =>
   r.approved.includes(c.key) || r.approved.includes(c.id);
@@ -510,12 +566,12 @@ export function reviewTotals(rows: Change[], r: Rev, old?: Rev) {
 }
 export type VariationSummary = ReturnType<typeof reviewTotals>;
 export const variationHeadline = (m: VariationSummary) =>
-  "Total proposed variation: " +
-  (m.proposed === null ? m.status : "PKR " + fmt(m.proposed));
+  regionalText("Total proposed variation: ") +
+  (m.proposed === null ? m.status : formatMoney(m.proposed));
 export const pricedSubtotalText = (m: VariationSummary) =>
   m.unpriced && !m.pricedCount
     ? "No priced changes yet"
-    : "PKR " + fmt(m.pricedSubtotal);
+    : formatMoney(m.pricedSubtotal);
 export function finalChecks(r: Rev, rows: Change[]) {
   return [
     ...exceptions(r),
@@ -524,7 +580,7 @@ export function finalChecks(r: Rev, rows: Change[]) {
       .map((c) => c.id + " · " + c.description + " awaiting confirmation"),
     ...rows
       .filter((c) => c.delta === null)
-      .map((c) => c.id + " · Variation has an unresolved amount"),
+      .map((c) => c.id + regionalText(" · Variation has an unresolved amount")),
   ];
 }
 export const sheetLabel = (s: Sheet | undefined) =>
@@ -599,8 +655,15 @@ export function quantityExplanation(i: Item, r: Rev) {
   const source = piece(i.kind)
     ? "Manual count"
     : i.kind === "Vertical riser"
-      ? "Explicit vertical length " + fmt(i.rise) + " m"
-      : "Calibrated path at " + fmt(s?.scale, 6) + " m per PDF point";
+      ? "Explicit vertical length " +
+        fmt(shown(i.rise, "length")) +
+        " " +
+        unitLabel("length")
+      : "Calibrated path at " +
+        fmt(shown(s?.scale, "length"), 6) +
+        " " +
+        unitLabel("length") +
+        " per PDF point";
   const waste =
     piece(i.kind) || q.basis === "labour"
       ? "No waste applied"
@@ -608,7 +671,12 @@ export function quantityExplanation(i: Item, r: Rev) {
   return (
     source +
     ". " +
-    shape +
+    (currentRegion.units === "imperial" && !piece(i.kind)
+      ? fmt(shown(q.area, "area"), 4) +
+        " ft² sheet area along " +
+        fmt(shown(q.length, "length"), 4) +
+        " ft"
+      : shape) +
     ". " +
     fmt(q.net, 6) +
     " " +
@@ -619,23 +687,23 @@ export function quantityExplanation(i: Item, r: Rev) {
     fmt(q.quantity, 6) +
     " " +
     q.unit +
-    " priced × PKR " +
-    fmt(q.rate, 6) +
+    " priced × " +
+    formatMoney(q.rate, undefined, 6) +
     "/" +
     q.unit +
-    " = PKR " +
-    fmt(q.labourRate ? q.baseAmount : q.amount) +
+    " = " +
+    formatMoney(q.labourRate ? q.baseAmount : q.amount) +
     (q.labourRate
       ? ". Additional labour: " +
         fmt(q.labourQuantity, 6) +
         " " +
         q.unit +
-        " × PKR " +
-        fmt(q.labourRate) +
-        " = PKR " +
-        fmt(q.labourAmount) +
-        ". Total PKR " +
-        fmt(q.amount)
+        " × " +
+        formatMoney(q.labourRate) +
+        " = " +
+        formatMoney(q.labourAmount) +
+        ". Total " +
+        formatMoney(q.amount)
       : "") +
     "."
   );
@@ -683,4 +751,22 @@ export function pairSheets(
     used.add(number);
     return { ...sh, number };
   });
+}
+
+export function convertWorkingRates(r: Rev, units: RegionalSettings["units"]) {
+  if (r.frozen) throw Error("Approved revisions are locked.");
+  for (const item of r.items) {
+    const converted = rateConversion(pricingUnit(item, r), units);
+    if (converted) {
+      item.pricingUnit = converted.unit;
+      if (item.labourRate != null) item.labourRate *= converted.factor;
+    }
+  }
+  for (const rate of r.rates) {
+    const converted = rateConversion(normalizeUnit(rate.unit) ?? "", units);
+    if (converted) {
+      rate.unit = converted.unit;
+      if (rate.rate != null) rate.rate *= converted.factor;
+    }
+  }
 }

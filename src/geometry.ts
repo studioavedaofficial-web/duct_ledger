@@ -1,3 +1,4 @@
+import { displayQuantity, currentRegion, unitLabel } from "./region";
 import type { Pt, Sheet } from "./model";
 
 export type GenericMeasurement = {
@@ -142,7 +143,10 @@ export function validMeasurement(
 }
 
 export function measurementValues(m: GenericMeasurement, scale: number | null) {
-  const unit = m.kind === "Polygon" ? "m²" : "m";
+  const dimension = m.kind === "Polygon" ? "area" : "length";
+  const unit = unitLabel(dimension);
+  const display = (n: number) =>
+    displayQuantity(n, dimension, currentRegion.units);
   if (
     scale === null ||
     !Number.isFinite(scale) ||
@@ -152,15 +156,18 @@ export function measurementValues(m: GenericMeasurement, scale: number | null) {
     return { unit, gross: null, deducted: null, net: null };
   const gross =
     m.kind === "Polygon"
-      ? ringArea(m.points) * scale ** 2
+      ? ringArea(m.points) * scale * scale
       : m.points
           .slice(1)
           .reduce((v, p, i) => v + distance(p, m.points[i]) * scale, 0);
-  const deducted = m.cutouts.reduce((v, h) => v + ringArea(h) * scale ** 2, 0);
+  const deducted = m.cutouts.reduce(
+    (v, h) => v + ringArea(h) * scale * scale,
+    0,
+  );
   return {
     unit,
-    gross: Number(gross.toFixed(6)),
-    deducted: Number(deducted.toFixed(6)),
-    net: Number((gross - deducted).toFixed(6)),
+    gross: display(gross),
+    deducted: display(deducted),
+    net: display(gross - deducted),
   };
 }

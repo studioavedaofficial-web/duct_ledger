@@ -1,3 +1,11 @@
+import {
+  currencySymbol,
+  formatMoney,
+  currentRegion,
+  canonicalQuantity,
+  shown,
+  unitLabel,
+} from "./region";
 import { useEffect, useRef, useState } from "react";
 import {
   SlidersHorizontal,
@@ -124,11 +132,23 @@ export function Inspector({
             {f ? (
               <Dim label="Count" value={item.count} unit="pc" />
             ) : item.kind === "Circular duct" ? (
-              <Dim label="Diameter" value={item.diameter} unit="mm" />
+              <Dim
+                label="Diameter"
+                value={shown(item.diameter, "size")}
+                unit={unitLabel("size")}
+              />
             ) : (
               <>
-                <Dim label="Width" value={item.width} unit="mm" />
-                <Dim label="Height" value={item.height} unit="mm" />
+                <Dim
+                  label="Width"
+                  value={shown(item.width, "size")}
+                  unit={unitLabel("size")}
+                />
+                <Dim
+                  label="Height"
+                  value={shown(item.height, "size")}
+                  unit={unitLabel("size")}
+                />
               </>
             )}
           </div>
@@ -139,7 +159,9 @@ export function Inspector({
                   ? "Vertical length"
                   : "Measured length"}
               </span>
-              <b>{fmt(c.length)} m</b>
+              <b>
+                {fmt(shown(c.length, "length"))} {unitLabel("length")}
+              </b>
             </div>
           )}
         </section>
@@ -166,29 +188,28 @@ export function Inspector({
           <div className="keyrow">
             <span>Unit rate</span>
             <b>
-              {c.rate ?? "—"} <small>PKR/{c.unit}</small>
+              {formatMoney(c.rate, undefined, 12)} <small>/{c.unit}</small>
             </b>
           </div>
           {c.labourRate > 0 && (
             <>
               <div className="keyrow">
                 <span>Mapped cost</span>
-                <b>PKR {fmt(c.baseAmount)}</b>
+                <b>{formatMoney(c.baseAmount)}</b>
               </div>
               <div className="keyrow">
                 <span>Additional labour</span>
                 <b>
-                  {fmt(c.labourQuantity, 6)} {c.unit} × {fmt(c.labourRate)} =
-                  PKR {fmt(c.labourAmount)}
+                  {fmt(c.labourQuantity, 6)} {c.unit} × {fmt(c.labourRate)}
+                  {" = "}
+                  {formatMoney(c.labourAmount)}
                 </b>
               </div>
             </>
           )}
           <div className="amountbox">
             <span>Item amount</span>
-            <strong>
-              <small>PKR</small> {fmt(c.amount)}
-            </strong>
+            <strong>{formatMoney(c.amount)}</strong>
           </div>
           <button className="calc-toggle" onClick={() => setDetail(!detail)}>
             <ChevronDown size={14} />
@@ -305,7 +326,11 @@ export function ItemForm({
     k: "width" | "height" | "diameter" | "rise" | "count" | "waste",
     label: string,
   ) => (
-    <Field label={label}>
+    <Field
+      label={label
+        .replace("(mm)", "(" + unitLabel("size") + ")")
+        .replace("(m)", "(" + unitLabel("length") + ")")}
+    >
       <input
         type="number"
         min={k === "count" ? 1 : k === "waste" ? 0 : 0.00001}
@@ -324,9 +349,26 @@ export function ItemForm({
             : undefined
         }
         step={k === "count" ? 1 : "any"}
-        value={x[k] ?? ""}
+        value={
+          (k === "rise"
+            ? shown(x[k], "length")
+            : ["width", "height", "diameter"].includes(k)
+              ? shown(x[k], "size")
+              : x[k]) ?? ""
+        }
         onChange={(e) =>
-          f(k, e.target.value === "" ? null : Number(e.target.value))
+          f(
+            k,
+            e.target.value === ""
+              ? null
+              : canonicalQuantity(
+                  Number(e.target.value),
+                  k === "rise" ? "length" : "size",
+                  ["count", "waste"].includes(k)
+                    ? "metric"
+                    : currentRegion.units,
+                ),
+          )
         }
       />
     </Field>
@@ -478,7 +520,7 @@ export function ItemForm({
               <option value="labour">Labour</option>
             </Choice>
           </Field>
-          <Field label={"Additional labour (PKR/" + unit + ")"}>
+          <Field label={`Additional labour (${currencySymbol()}/` + unit + ")"}>
             <input
               type="number"
               min="0"
@@ -497,7 +539,7 @@ export function ItemForm({
               value={unit}
               onChange={(e) => f("pricingUnit", e.target.value as Unit)}
             >
-              {(piece(x.kind) ? ["pc"] : ["m²", "m"]).map((u) => (
+              {(piece(x.kind) ? ["pc"] : ["m²", "m", "ft²", "ft"]).map((u) => (
                 <option key={u}>{u}</option>
               ))}
             </Choice>

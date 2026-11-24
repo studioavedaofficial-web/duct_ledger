@@ -1,3 +1,41 @@
+import {
+  convertWorkingRates,
+  pairSheets,
+  today,
+  uid,
+  newProject,
+  newItem,
+  changes,
+  totals,
+  calculate,
+  keepValidApprovals,
+  reviewTotals,
+  finalChecks,
+  sheetLabel,
+  confirmed,
+  type Change,
+  fmt,
+  distance,
+  kinds,
+  piece,
+  type Project,
+  type Rev,
+  type Sheet,
+  type Item,
+  type Pt,
+  type Kind,
+} from "./model";
+import {
+  formatMoney,
+  shown as shownQuantity,
+  accountRegion,
+  currentRegion,
+  setProjectRegion,
+  unitLabel,
+  canonicalQuantity,
+  regionalText,
+} from "./region";
+import { RegionalFields } from "./RegionalFields";
 import { accountKey } from "./account";
 import { allocateIds, runSettings } from "./runSettings";
 import { SymbolSearch } from "./SymbolSearch";
@@ -37,32 +75,6 @@ import {
   importPDF,
   thumbnail,
 } from "./io";
-import {
-  pairSheets,
-  today,
-  uid,
-  newProject,
-  newItem,
-  changes,
-  totals,
-  calculate,
-  keepValidApprovals,
-  reviewTotals,
-  finalChecks,
-  sheetLabel,
-  confirmed,
-  type Change,
-  fmt,
-  distance,
-  kinds,
-  piece,
-  type Project,
-  type Rev,
-  type Sheet,
-  type Item,
-  type Pt,
-  type Kind,
-} from "./model";
 import { sampleTender } from "./sample";
 import { sampleThumbnails } from "./sampleLayout";
 import { DrawingCanvas, type Tool } from "./Canvas";
@@ -283,10 +295,7 @@ export default function App() {
   function commit(fn: (rr: Rev, np: Project) => void, forget = false) {
     if (!p || !r || r.frozen) return;
     const next = structuredClone(p);
-    fn(
-      next.revs.find((x) => x.id === r.id)!,
-      next,
-    );
+    fn(next.revs.find((x) => x.id === r.id)!, next);
     if (forget) undoStack.current = [];
     else {
       undoStack.current.push(p);
@@ -361,7 +370,7 @@ export default function App() {
     if (!s || !r || r.frozen) return;
     P(pts);
     if (tool === "Calibrate" || tool === "Verify") {
-      U("m");
+      U(unitLabel("length"));
       open("distance");
       return;
     }
@@ -455,6 +464,7 @@ export default function App() {
     activate(np, false, true);
     notify("Revision created · review carried measurements");
   }
+  setProjectRegion(p?.regionalSettings);
   if (!p || !r)
     return (
       <div className="startup">
@@ -565,7 +575,7 @@ export default function App() {
         </div>
         <div className="workspacehead">
           <div className="headingblock">
-            <h1>{viewNames[view]}</h1>
+            <h1>{regionalText(viewNames[view])}</h1>
             <div className="projectline">
               <span>
                 {p.name}
@@ -816,7 +826,7 @@ export default function App() {
                     ? "Revision " +
                       r.id +
                       (r.frozen ? " · Approved" : " · Working revision")
-                    : "Variation summary"}
+                    : regionalText("Variation summary")}
                 </h2>
               </div>
               <div className="actionrow">
@@ -986,9 +996,11 @@ export default function App() {
           {saved}
         </span>
         <span>
-          <b>PKR</b>
+          <button onClick={() => open("region")}>
+            Project settings · {currentRegion.currency}
+          </button>
           <i />
-          Metric units
+          {currentRegion.units} units
           <i />
           <button onClick={() => open("help")}>
             <HelpCircle size={14} />
@@ -1029,6 +1041,34 @@ export default function App() {
           }
         }}
       />
+      {dialog === "region" && (
+        <Modal title="Project settings" close={close}>
+          <p>
+            Currency changes relabel existing amounts. Existing rate units and
+            prices are retained.
+          </p>
+          <RegionalFields
+            value={currentRegion}
+            onChange={(regionalSettings) => persist({ ...p, regionalSettings })}
+          />
+          <button
+            onClick={() =>
+              persist({ ...p, regionalSettings: { ...accountRegion } })
+            }
+          >
+            Apply account defaults
+          </button>
+          <button
+            disabled={r.frozen}
+            onClick={() => {
+              commit((rr) => convertWorkingRates(rr, currentRegion.units));
+              notify("Working revision rate units converted.");
+            }}
+          >
+            Convert working revision rates to {currentRegion.units} units
+          </button>
+        </Modal>
+      )}
       {dialog === "projects" && (
         <Modal title="Local projects" close={close}>
           <div className="projectlist">
@@ -1194,7 +1234,9 @@ export default function App() {
             {piece(kind)
               ? "Place the fitting at its drawing location. Enter its piece count in the inspector."
               : kind === "Vertical riser"
-                ? "Place the riser on the plan, then enter its vertical length in metres."
+                ? "Place the riser on the plan, then enter its vertical length in " +
+                  unitLabel("length") +
+                  "."
                 : "Click both ends of a straight run. End the run at fitting boundaries."}
           </p>
           <div className="formactions">
@@ -1271,7 +1313,6 @@ export default function App() {
             !piece(editItem.kind) &&
             editItem.kind !== "Vertical riser"
           }
-
           r={r}
           close={close}
           submit={(i, next) => {
@@ -1358,7 +1399,10 @@ export default function App() {
                 <span>Measurement scale</span>
                 <b>
                   {s.scale
-                    ? fmt(s.scale, 6) + " m / PDF point"
+                    ? fmt(shownQuantity(s.scale, "length"), 6) +
+                      " " +
+                      unitLabel("length") +
+                      " / PDF point"
                     : "Uncalibrated"}
                 </b>
               </div>
@@ -1468,7 +1512,12 @@ export default function App() {
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              const len = Number(v) / (unit === "mm" ? 1000 : 1),
+              const len =
+                  unit === "ft"
+                    ? canonicalQuantity(Number(v), "length", "imperial")
+                    : unit === "in"
+                      ? canonicalQuantity(Number(v), "size", "imperial") / 1000
+                      : Number(v) / (unit === "mm" ? 1000 : 1),
                 d = distance(points[0], points[1]);
               if (!Number.isFinite(len) || len <= 0 || d <= 0) return;
               const ver = tool === "Verify",
@@ -1490,12 +1539,15 @@ export default function App() {
                       ? "Verification " +
                         (pass ? "passed" : "failed") +
                         " · measured " +
-                        fmt(measured) +
-                        " m"
+                        fmt(shownQuantity(measured, "length")) +
+                        " " +
+                        unitLabel("length")
                       : "Calibrated") +
                     " against " +
-                    fmt(len) +
-                    " m at " +
+                    fmt(Number(v)) +
+                    " " +
+                    unit +
+                    " at " +
                     points
                       .map((pt) => pt.map((v) => fmt(v, 2)).join(","))
                       .join(" to "),
@@ -1525,16 +1577,21 @@ export default function App() {
               </Field>
               <Field label="Length unit">
                 <Choice value={unit} onChange={(e) => U(e.target.value)}>
-                  <option>m</option>
-                  <option>mm</option>
+                  <option>{unitLabel("length")}</option>
+                  <option>{unitLabel("size")}</option>
                 </Choice>
               </Field>
             </div>
             {tool === "Verify" && (
               <p>
                 Measured length{" "}
-                {fmt(distance(points[0], points[1]) * (s.scale ?? 0))} m ·
-                tolerance 1%
+                {fmt(
+                  shownQuantity(
+                    distance(points[0], points[1]) * (s.scale ?? 0),
+                    "length",
+                  ),
+                )}{" "}
+                {unitLabel("length")} · tolerance 1%
               </p>
             )}
             <div className="formactions">
@@ -1695,8 +1752,10 @@ export default function App() {
       {dialog === "freeze" && (
         <Modal title={"Approve Revision " + r.id} close={close}>
           <p>
-            Freeze this revision’s drawings, rates, assumptions and priced
-            quantities at PKR {fmt(totals(r))}.
+            {regionalText(
+              "Freeze this revision’s drawings, rates, assumptions and priced quantities at ",
+            )}
+            {formatMoney(totals(r))}.
           </p>
           {(!r.items.length || checks.length > 0) && (
             <div className="issue">
@@ -1797,8 +1856,9 @@ export default function App() {
               pages and confirm changed items.
             </li>
             <li>
-              Export a variation workbook or print a marked client report. Back
-              up the project from the Projects menu.
+              {regionalText(
+                "Export a variation workbook or print a marked client report. Back up the project from the Projects menu.",
+              )}
             </li>
           </ol>
           <h4>Sample files</h4>
