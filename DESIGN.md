@@ -45,7 +45,7 @@ Anchor the hero copy at the lower left. Give the elbow its own space above the c
 
 ## Motion
 
-Use the supplied Spline scene as the interactive background. Use its still frame for reduced motion and a WebGL fallback. Keep highlights and parallax behind the text.
+Show the rendered fitting and a still background immediately. Keep native page scrolling available over the hero. Load the interactive renderer only when the visitor opens the model viewer.
 
 ## References
 

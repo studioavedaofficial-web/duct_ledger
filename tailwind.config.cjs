@@ -19,7 +19,7 @@ const colors = Object.fromEntries(
   ].map((key) => [key, "hsl(var(--" + key + "))"]),
 );
 module.exports = {
-  content: ["./index.html", "./src/LandingScene.tsx"],
+  content: ["./index.html", "./src/landing.ts"],
   theme: {
     extend: {
       colors,

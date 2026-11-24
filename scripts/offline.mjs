@@ -8,7 +8,7 @@ const walk = async (dir) =>
       ),
     )
   ).flat();
-// Keep the workspace available offline without preloading optional Spline modules.
+// Keep the workspace available offline without preloading the optional 3D viewer.
 const manifestPath = "dist/.vite/manifest.json";
 const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
 function dependencies(entries, dynamic) {

@@ -17,7 +17,7 @@
       type="font/ttf"
       crossorigin
     />
-    <script type="module" src="/src/LandingScene.tsx"></script>
+    <script type="module" src="/src/landing.ts"></script>
     <link rel="stylesheet" href="/src/landing.css" />
     <script>
       if (new URLSearchParams(location.search).has("project"))
@@ -31,7 +31,8 @@
           ><img src="/mark.svg" alt="" />DuctLedger</a
         >
         <nav aria-label="Main navigation">
-          <a href="#workflow">Workflow</a><a href="#tender">Sample tender</a>
+          <a href="#workflow">Workspace features</a
+          ><a href="#tender">Sample tender</a>
         </nav>
         <div id="nav-launch">
           <a class="nav-open" href="/workspace/"
@@ -51,9 +52,29 @@
             fetchpriority="high"
           />
           <figcaption>
-            <span>90° rectangular elbow</span><span id="model-controls"></span>
+            <span>90° rectangular elbow</span
+            ><button hidden class="inspect" type="button">Inspect in 3D</button>
           </figcaption>
         </figure>
+        <dialog class="model-dialog" aria-labelledby="model-title">
+          <div class="viewer-head">
+            <h2 id="model-title">90° rectangular elbow</h2>
+            <button class="viewer-action close-model" aria-label="Close model">
+              Close
+            </button>
+          </div>
+          <div
+            class="model-stage"
+            tabindex="0"
+            aria-label="Rotate the elbow with the left and right arrow keys"
+          ></div>
+          <div class="viewer-foot">
+            <span role="status"></span
+            ><button class="viewer-action reset-view" disabled>
+              Reset view
+            </button>
+          </div>
+        </dialog>
         <div class="wrap hero-inner">
           <div class="hero-copy">
             <p class="kicker">
@@ -83,28 +104,148 @@
         </div>
       </section>
       <section id="workflow" class="wrap workflow">
-        <p class="kicker">THE WORKFLOW</p>
-        <h2>Build an estimate from the plan.</h2>
-        <div class="steps">
-          <article>
-            <h3>Measure on the drawing</h3>
+        <p class="kicker">Inside the workspace</p>
+        <h2>From the first measurement to the final BOQ.</h2>
+        <div class="workspace-tour">
+          <div>
+            <h3>Start with the drawing</h3>
             <p>
-              Calibrate your PDF to a known dimension. Trace duct runs and count
-              elbows, tees and diffusers.
+              Upload a multi-page PDF, name the sheets and calibrate each one
+              against a known length. Verify a second dimension before tracing.
+              Flag a mixed-scale sheet to prevent measurements at the wrong
+              scale.
+            </p>
+            <p>
+              Zoom, pan or rotate the drawing. Snap to available endpoints, lock
+              a run horizontally or vertically, and undo or redo an edit.
+            </p>
+            <a class="sheet-link" href="/workspace/?sample=1"
+              >Explore the sample workspace ↗</a
+            >
+          </div>
+          <figure>
+            <img
+              src="/landing/takeoff-workspace.webp"
+              loading="lazy"
+              decoding="async"
+              width="1120"
+              height="708"
+              alt="Crescent tender in Takeoff with the sheet list, drawing and selected duct inspector."
+            />
+            <figcaption>
+              Crescent Business Centre · Takeoff workspace
+            </figcaption>
+          </figure>
+        </div>
+        <div class="steps capabilities">
+          <article>
+            <h3>Duct runs &amp; fittings</h3>
+            <p>
+              Trace rectangular and circular ducts, enter a vertical rise or
+              place an elbow, tee, reducer, damper or diffuser. Fittings use
+              whole-piece counts.
+            </p>
+            <p>
+              Choose <strong>Save &amp; measure next</strong> to reuse
+              dimensions, system, waste and BOQ mapping. Each pair of endpoints
+              creates a separate duct.
             </p>
           </article>
           <article>
-            <h3>Price the quantities</h3>
+            <h3>Lengths &amp; areas</h3>
             <p>
-              Map each item to a BOQ code and apply your rates per metre, square
-              metre or piece.
+              Measure a straight length, follow a polyline or trace a polygon.
+              Add cutouts to see gross, deducted and net area separately from
+              duct surface area.
+            </p>
+            <p>
+              Select a rectangle and review similar outlines on the sheet. Save
+              the selected areas together and rescan without doubling the total.
             </p>
           </article>
           <article>
-            <h3>Review each variation</h3>
+            <h3>Reviewed AutoCount</h3>
             <p>
-              Compare revisions against the approved baseline. Follow a change
-              to its drawing and export the supporting breakdown.
+              Box one diffuser or grille and search the sheet for similar
+              symbols. Click to reject false matches or mark a missed symbol
+              yourself.
+            </p>
+            <p>
+              Accepted locations become individual drawing items. A repeat
+              search skips locations already counted.
+            </p>
+          </article>
+          <article>
+            <h3>Rates &amp; presets</h3>
+            <p>
+              Import contractor rates from CSV or Excel, map the columns and
+              check units. Choose or add a compatible rate directly in the
+              drawing inspector.
+            </p>
+            <p>
+              Save recurring duct and fitting settings as presets. Review
+              material waste, optional labour and the effect of changing a
+              shared rate.
+            </p>
+          </article>
+          <article>
+            <h3>Bill of quantities</h3>
+            <p>
+              Group measured items by BOQ code. Expand a line to inspect its
+              source items, measured and priced quantities, rounding and amount.
+              Roll compatible contractor codes into one client line and see when
+              a group uses mixed rates.
+            </p>
+            <p>
+              Populate a copy of the client’s Excel BOQ while preserving its
+              formulas and unrelated cells. Preview the destination cells before
+              downloading.
+            </p>
+          </article>
+          <article>
+            <h3>Revisions &amp; approvals</h3>
+            <p>
+              Freeze the approved baseline, attach a revised PDF and pair its
+              pages, even when the drawing order changes. Align the overlay,
+              adjust opacity or compare sheets side by side.
+            </p>
+            <p>
+              Review additions, removals and resized items by sheet. Inspect old
+              and new dimensions, quantities and rates before confirming a
+              change.
+            </p>
+          </article>
+          <article>
+            <h3>Queries &amp; drawing evidence</h3>
+            <p>
+              Pin a tender question to its location on a sheet, then record the
+              response in the query register. Follow a changed item from its
+              report back to the drawing.
+            </p>
+          </article>
+          <article>
+            <h3>Variations &amp; reports</h3>
+            <p>
+              See scope and rate effects, credits, and pending or confirmed
+              priced subtotals. A missing rate leaves the overall total
+              incomplete while known money stays visible.
+            </p>
+            <p>
+              Export an Excel workbook, download a CSV table or print a client
+              report with drawing evidence. Outstanding checks block final issue
+              while draft reports remain available.
+            </p>
+          </article>
+          <article>
+            <h3>Local projects &amp; backups</h3>
+            <p>
+              Open a fresh sample or start your own tender. Drawings, rates and
+              revisions stay in this browser. Once the workspace has been
+              cached, you can reopen it offline.
+            </p>
+            <p>
+              Download a project backup, restore it on another device or delete
+              an individual project from this browser.
             </p>
           </article>
         </div>
@@ -122,6 +263,14 @@
             <a class="sheet-link" href="/samples/ductledger-rev-b.pdf"
               >View Revision B drawing (PDF) ↗</a
             >
+            <div class="sample-files" aria-label="Sample files">
+              <a href="/samples/contractor-rates.xlsx" download
+                >Contractor rates (Excel) ↓</a
+              >
+              <a href="/samples/client-boq.xlsx" download
+                >Client BOQ template (Excel) ↓</a
+              >
+            </div>
           </div>
           <div class="ledger">
             <img

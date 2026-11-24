@@ -30,7 +30,7 @@
   box-sizing: border-box;
 }
 html {
-  scroll-behavior: smooth;
+  scroll-behavior: auto;
   scroll-padding-top: 85px;
 }
 body {
@@ -59,7 +59,7 @@ header {
   inset: 0 0 auto;
   z-index: 5;
   background: linear-gradient(#101211dd, #101211a6);
-  backdrop-filter: blur(12px);
+  background-color: #121513;
   border-bottom: 1px solid #ffffff1c;
 }
 .nav,
@@ -149,18 +149,6 @@ footer a:hover,
 #scene {
   z-index: -3;
   background: #141615 url(/landing/scene-poster.webp) center/cover;
-}
-.scene-content,
-.scene-content > div {
-  width: 100%;
-  height: 100%;
-}
-.scene-content {
-  opacity: 0;
-  transition: opacity 0.6s;
-}
-.scene-content.ready {
-  opacity: 1;
 }
 .hero-shade {
   z-index: -2;
@@ -306,28 +294,6 @@ h1 span {
   width: 28px;
   height: 1px;
   background: var(--lime);
-}
-.hero-copy > * {
-  @apply animate-fade-up;
-}
-.hero-copy .kicker {
-  animation-delay: 0.05s;
-}
-.hero-copy h1 {
-  animation-delay: 0.2s;
-}
-.subheading {
-  animation-delay: 0.4s;
-}
-.intro {
-  animation-delay: 0.55s;
-}
-.actions {
-  animation-delay: 0.7s;
-}
-.hero-foot {
-  @apply animate-fade-in;
-  animation-delay: 0.85s;
 }
 .workflow,
 .tender-grid {
@@ -614,4 +580,71 @@ footer > a:last-child {
     font-size: 10px;
     padding: 5px 8px;
   }
+}
+
+.inspect[hidden] {
+  display: none;
+}
+#scene {
+  pointer-events: none;
+}
+.workspace-tour {
+  display: grid;
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.35fr);
+  align-items: center;
+  gap: 5%;
+  margin-block: 3rem 4rem;
+}
+.workspace-tour h3 {
+  font-size: clamp(22px, 2vw, 32px);
+  letter-spacing: -0.045em;
+}
+.workspace-tour p {
+  color: #b4bab5;
+  margin: 12px 0;
+}
+.workspace-tour a {
+  display: inline-block;
+  margin-top: 12px;
+}
+.workspace-tour img {
+  width: 100%;
+  height: auto;
+  display: block;
+  border: 1px solid #455048;
+  border-radius: 5px;
+}
+.workspace-tour figcaption {
+  margin-top: 10px;
+  color: #b4bab5;
+}
+.capabilities {
+  row-gap: 36px;
+}
+.capabilities strong {
+  color: #e4eae5;
+}
+@media (max-width: 767px) {
+  .workspace-tour {
+    grid-template-columns: 1fr;
+    gap: 24px;
+    margin-block: 2rem;
+  }
+  .capabilities {
+    gap: 22px;
+  }
+}
+.sample-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin-top: 20px;
+  font-size: 13px;
+}
+.sample-files a {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.sample-files a:hover {
+  color: var(--lime);
 }
