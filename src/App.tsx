@@ -1,3 +1,4 @@
+import { accountKey } from "./account";
 import { allocateIds, runSettings } from "./runSettings";
 import { SymbolSearch } from "./SymbolSearch";
 import { Measurements } from "./Measurements";
@@ -199,22 +200,26 @@ export default function App() {
         Saved("Save failed");
         notify(String(e));
       });
-    localStorage.setItem("dl-active", next.id);
+    localStorage.setItem(accountKey("dl-active"), next.id);
   }
   function activate(next: Project, stored = false, existing = false) {
     const rr = stored
-      ? (next.revs.find((x) => x.id === localStorage.getItem("dl-rev")) ??
-        next.revs.at(-1)!)
+      ? (next.revs.find(
+          (x) => x.id === localStorage.getItem(accountKey("dl-rev")),
+        ) ?? next.revs.at(-1)!)
       : next.revs.at(-1)!;
     const ss = stored
-      ? (rr.sheets.find((x) => x.id === localStorage.getItem("dl-sheet")) ??
-        rr.sheets[0])
+      ? (rr.sheets.find(
+          (x) => x.id === localStorage.getItem(accountKey("dl-sheet")),
+        ) ?? rr.sheets[0])
       : rr.sheets[0];
     setR(rr.id);
     setS(ss?.id ?? "");
     const chosen = stored
       ? rr.items.find(
-          (i) => i.sheet === ss?.id && i.id === localStorage.getItem("dl-item"),
+          (i) =>
+            i.sheet === ss?.id &&
+            i.id === localStorage.getItem(accountKey("dl-item")),
         )
       : undefined;
     setI(chosen?.id ?? rr.items.find((i) => i.sheet === ss?.id)?.id ?? "");
@@ -231,7 +236,9 @@ export default function App() {
     (async () => {
       try {
         const link = new URLSearchParams(location.search),
-          id = link.get("project") ?? localStorage.getItem("dl-active");
+          id =
+            link.get("project") ??
+            localStorage.getItem(accountKey("dl-active"));
         const demo = link.get("sample") === "1";
         const savedProject = !demo && id ? await getProject(id) : undefined;
         const next = demo
@@ -268,9 +275,9 @@ export default function App() {
   }, []);
   useEffect(() => {
     if (p) {
-      localStorage.setItem("dl-rev", revId);
-      localStorage.setItem("dl-sheet", sheetId);
-      localStorage.setItem("dl-item", itemId);
+      localStorage.setItem(accountKey("dl-rev"), revId);
+      localStorage.setItem(accountKey("dl-sheet"), sheetId);
+      localStorage.setItem(accountKey("dl-item"), itemId);
     }
   }, [p, revId, sheetId, itemId]);
   function commit(fn: (rr: Rev, np: Project) => void, forget = false) {

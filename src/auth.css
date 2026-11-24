@@ -1,0 +1,49 @@
+.auth-card,
+.auth-bar {
+  font-family: system-ui, sans-serif;
+  color: #173329;
+  background: #f5f8f3;
+}
+.auth-card {
+  box-sizing: border-box;
+  max-width: 420px;
+  margin: 10vh auto;
+  padding: 28px;
+  border: 1px solid #bed0c2;
+  border-radius: 12px;
+}
+.auth-card a {
+  color: inherit;
+  font-weight: 700;
+}
+.auth-card label,
+.auth-card input {
+  display: block;
+  margin: 12px 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+.auth-card input,
+.auth-card button,
+.auth-bar button {
+  padding: 10px;
+  border: 1px solid #96afa0;
+  border-radius: 5px;
+}
+.auth-card button,
+.auth-bar button {
+  cursor: pointer;
+}
+.auth-card form button {
+  background: #193c2b;
+  color: white;
+  width: 100%;
+}
+.auth-bar {
+  text-align: right;
+  padding: 4px 12px;
+  font-size: 13px;
+}
+.auth-bar button {
+  padding: 4px 10px;
+}

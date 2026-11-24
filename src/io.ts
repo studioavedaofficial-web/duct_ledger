@@ -1,3 +1,4 @@
+import { accountId } from "./account";
 import { validMeasurement } from "./geometry";
 import { openDB } from "idb";
 import { getDocument, GlobalWorkerOptions } from "pdfjs-dist";
@@ -12,11 +13,15 @@ import {
   type Rev,
 } from "./model";
 GlobalWorkerOptions.workerSrc = worker;
-const db = openDB("ductledger-local-v1", 1, {
-  upgrade(db) {
-    db.createObjectStore("projects", { keyPath: "id" });
+const db = openDB(
+  accountId ? "ductledger-user-" + accountId : "ductledger-local-v1",
+  1,
+  {
+    upgrade(db) {
+      db.createObjectStore("projects", { keyPath: "id" });
+    },
   },
-});
+);
 export async function save(p: Project, requireExisting = false) {
   const tx = (await db).transaction("projects", "readwrite"),
     stored = (await tx.store.get(p.id)) as Project | undefined;
