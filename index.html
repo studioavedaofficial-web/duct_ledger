@@ -3,13 +3,21 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <meta name="theme-color" content="#152f26" />
+    <meta name="theme-color" content="#141414" />
     <meta
       name="description"
       content="Measure HVAC drawings, build a bill of quantities and review priced revisions with DuctLedger. Explore a working mechanical tender in your browser."
     />
     <title>DuctLedger | HVAC takeoff and variation pricing</title>
     <link rel="icon" href="/mark.svg" />
+    <link
+      rel="preload"
+      href="/landing/sora.ttf"
+      as="font"
+      type="font/ttf"
+      crossorigin
+    />
+    <script type="module" src="/src/LandingScene.tsx"></script>
     <link rel="stylesheet" href="/src/landing.css" />
     <script>
       if (new URLSearchParams(location.search).has("project"))
@@ -23,42 +31,55 @@
           ><img src="/mark.svg" alt="" />DuctLedger</a
         >
         <nav aria-label="Main navigation">
-          <a href="#workflow">Workflow</a><a href="#tender">Sample tender</a
-          ><a class="nav-open" href="/workspace/">Open workspace ↗</a>
+          <a href="#workflow">Workflow</a><a href="#tender">Sample tender</a>
         </nav>
+        <div id="nav-launch">
+          <a class="nav-open" href="/workspace/"
+            >Open workspace <span aria-hidden="true">↗</span></a
+          >
+        </div>
       </div>
     </header>
     <main>
-      <section class="hero">
-        <div class="wrap hero-grid">
-          <div>
-            <p class="kicker">HVAC TAKEOFF &amp; ESTIMATING</p>
-            <h1>From duct drawings to <em>priced quantities.</em></h1>
+      <section class="hero" aria-labelledby="hero-title">
+        <div id="scene" aria-hidden="true"></div>
+        <div class="hero-shade"></div>
+        <figure class="assembly">
+          <img
+            src="/landing/duct-elbow.webp"
+            alt="Three-dimensional rectangular sheet-metal elbow with flanged joints"
+            fetchpriority="high"
+          />
+          <figcaption>
+            <span>90° rectangular elbow</span><span id="model-controls"></span>
+          </figcaption>
+        </figure>
+        <div class="wrap hero-inner">
+          <div class="hero-copy">
+            <p class="kicker">
+              <i aria-hidden="true"></i> HVAC takeoff &amp; estimating
+            </p>
+            <h1 id="hero-title">DUCT<span>LEDGER</span></h1>
+            <p class="subheading">From drawing to priced quantities.</p>
             <p class="intro">
               Measure ductwork on your plans, apply contractor rates and show
               clients exactly what changed between revisions.
             </p>
-            <a class="primary" href="/workspace/"
-              >Open workspace <span aria-hidden="true">↗</span></a
-            >
-            <a class="secondary" href="/workspace/?sample=1"
-              >Try a sample project</a
+            <div class="actions">
+              <a class="primary" href="/workspace/"
+                >Open workspace <span aria-hidden="true">↗</span></a
+              >
+              <a class="secondary" href="/workspace/?sample=1"
+                >Try a sample project</a
+              >
+            </div>
+          </div>
+          <div class="hero-foot">
+            <span><i aria-hidden="true"></i> Projects saved on this device</span
+            ><a href="#workflow"
+              >Explore workflow <b aria-hidden="true">↓</b></a
             >
           </div>
-          <figure>
-            <div class="sheet-head">
-              <span>DRAWING DETAIL</span><b>REV B</b>
-            </div>
-            <div class="drawing">
-              <img
-                src="/samples/ground-floor-detail.webp"
-                alt="Ground floor mechanical drawing showing the supply duct run and fittings at Crescent Business Centre"
-              /><span>SA-001 · Supply main</span>
-            </div>
-            <figcaption>
-              <strong>M-101 / Ground floor</strong><span>800 × 400 mm</span>
-            </figcaption>
-          </figure>
         </div>
       </section>
       <section id="workflow" class="wrap workflow">
@@ -103,6 +124,12 @@
             >
           </div>
           <div class="ledger">
+            <img
+              class="drawing-detail"
+              src="/samples/ground-floor-detail.webp"
+              loading="lazy"
+              alt="Ground floor supply duct on sheet M-101"
+            />
             <table>
               <caption>
                 SA-001 · Supply main

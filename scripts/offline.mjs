@@ -8,7 +8,43 @@ const walk = async (dir) =>
       ),
     )
   ).flat();
-const files = (await walk("dist")).filter((f) => !f.endsWith("sw.js")).sort();
+// Keep the workspace available offline without preloading optional Spline modules.
+const manifestPath = "dist/.vite/manifest.json";
+const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
+function dependencies(entries, dynamic) {
+  const files = new Set(),
+    visited = new Set();
+  function visit(key) {
+    if (visited.has(key)) return;
+    visited.add(key);
+    const chunk = manifest[key];
+    for (const file of [
+      chunk.file,
+      ...(chunk.assets ?? []),
+      ...(chunk.css ?? []),
+    ])
+      files.add("dist/" + file);
+    for (const dependency of chunk.imports ?? []) visit(dependency);
+    if (dynamic)
+      for (const dependency of chunk.dynamicImports ?? []) visit(dependency);
+  }
+  entries.forEach(visit);
+  return files;
+}
+const sceneFiles = dependencies(
+  manifest["index.html"].dynamicImports ?? [],
+  true,
+);
+const coreFiles = new Set([
+  ...dependencies(["workspace/index.html"], true),
+  ...dependencies(["index.html"], false),
+]);
+await fs.unlink(manifestPath);
+const files = (await walk("dist"))
+  .filter(
+    (f) => !f.endsWith("sw.js") && (!sceneFiles.has(f) || coreFiles.has(f)),
+  )
+  .sort();
 const hash = createHash("sha256");
 for (const f of files) hash.update(await fs.readFile(f));
 const key = "ductledger-" + hash.digest("hex").slice(0, 16);
