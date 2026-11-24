@@ -13,6 +13,7 @@ export default function Auth() {
     [signup, setSignup] = useState(() => new URLSearchParams(location.search).get("auth") === "signup"),
     [busy, setBusy] = useState(false),
     [message, setMessage] = useState("");
+  const [deleting, setDeleting] = useState(false);
   useEffect(() => {
     let current = 0;
     const { data } = client.auth.onAuthStateChange((_event, session) => {
@@ -60,8 +61,27 @@ export default function Auth() {
           >
             Log out
           </button>{" "}
+          <button onClick={() => {setMessage("");setDeleting(true);}}>Delete my account</button>
           {message}
         </div>
+        {deleting && <section className="auth-card" aria-label="Confirm account deletion">
+          <h2>Permanently delete your account?</h2>
+          <p>You will lose access to this workspace. Project files remain on this device. Back up or remove your projects first.</p>
+          <form onSubmit={async e=>{
+            e.preventDefault();
+            const email=new FormData(e.currentTarget).get("email");
+            if(email!==user){setMessage("Enter your signed-in email exactly.");return;}
+            setBusy(true);setMessage("");
+            try {
+              const {error}=await client.functions.invoke("delete-my-account",{body:{confirmEmail:email}});
+              if(error){setMessage("Could not confirm account deletion. Please try again.");return;}
+              setUser("");setMessage("Account deleted.");await client.auth.signOut({scope:"local"});
+            }catch{setMessage("Could not confirm account deletion. Please try again.");}finally{setBusy(false);}
+          }}>
+          <label>Confirm your email<input type="email" name="email" autoComplete="off" required autoFocus/></label>
+          <button disabled={busy} type="submit">Permanently delete my account</button>
+          <button disabled={busy} type="button" onClick={()=>{setDeleting(false);setMessage("");}}>Cancel</button></form>
+        </section>}
         <Suspense fallback={<p>Opening workspace…</p>}>
           <Workspace />
         </Suspense>
