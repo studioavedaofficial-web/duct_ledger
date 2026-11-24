@@ -10,7 +10,7 @@ const Workspace = lazy(() => import("./App"));
 export default function Auth() {
   const [user, setUser] = useState(""),
     [loading, setLoading] = useState(true),
-    [signup, setSignup] = useState(false),
+    [signup, setSignup] = useState(() => new URLSearchParams(location.search).get("auth") === "signup"),
     [busy, setBusy] = useState(false),
     [message, setMessage] = useState("");
   useEffect(() => {

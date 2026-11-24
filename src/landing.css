@@ -648,3 +648,5 @@ footer > a:last-child {
 .sample-files a:hover {
   color: var(--lime);
 }
+.account-links {display:flex;align-items:center;gap:14px;font-size:13px;font-weight:600}
+.account-links .signup-link {padding:8px 14px;border-radius:4px;background:var(--lime);color:#081308}
