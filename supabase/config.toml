@@ -1,5 +1,5 @@
 project_id = "njztmcerqhpthokztdip"
 
-[functions.delete-my-account]
+[functions.rapid-function]
 # The handler verifies the bearer token with Auth before deriving the user ID.
 verify_jwt = false

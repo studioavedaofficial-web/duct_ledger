@@ -73,8 +73,8 @@ export default function Auth() {
             if(email!==user){setMessage("Enter your signed-in email exactly.");return;}
             setBusy(true);setMessage("");
             try {
-              const {error}=await client.functions.invoke("delete-my-account",{body:{confirmEmail:email}});
-              if(error){setMessage("Could not confirm account deletion. Please try again.");return;}
+              const {data,error}=await client.functions.invoke("rapid-function",{body:{confirmEmail:email}});
+              if(error || data?.message !== "Account deleted."){setMessage("Could not confirm account deletion. Please try again.");return;}
               setUser("");setMessage("Account deleted.");await client.auth.signOut({scope:"local"});
             }catch{setMessage("Could not confirm account deletion. Please try again.");}finally{setBusy(false);}
           }}>
